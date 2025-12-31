@@ -193,17 +193,14 @@ function BulkEditModal({
   };
 
   const parseValue = (field: string, value: string) => {
-    switch (field) {
-      case 'unitPrice':
-      case 'currentStock':
-      case 'minStock':
-        return parseFloat(value);
-      case 'currentStock':
-      case 'minStock':
-        return parseInt(value);
-      default:
-        return value;
+    // Eğer field sayısal bir alansa parse et
+    if (field === 'unitPrice' || field === 'currentStock' || field === 'minStock') {
+      const parsed = parseFloat(value);
+      // Eğer integer değer ise parseInt, değilse parseFloat döndür
+      return Number.isInteger(parsed) ? parseInt(value) : parsed;
     }
+    // Diğer alanlar için string değeri döndür
+    return value;
   };
 
   const handleRemoveEdit = (index: number) => {
@@ -1274,59 +1271,23 @@ function ExcelImportModal({ onImport, onClose }: { onImport: (materials: any[]) 
         
         headers.forEach((header, index) => {
           const value = values[index] || '';
-          switch (header) {
-            case 'Malzeme Adı':
-              material.name = value;
-              break;
-            case 'Barkod':
-              material.barcode = value;
-              break;
-            case 'GTIN':
-              material.gtin = value;
-              break;
-            case 'SN':
-              material.sn = value;
-              break;
-            case 'UDI Code':
-              material.udiCode = value;
-              break;
-            case 'All Barcode':
-              material.allBarcode = value;
-              break;
-            case 'Kategori':
-              material.category = value;
-              break;
-            case 'Alt Kategori':
-              material.subCategory = value;
-              break;
-            case 'Birim':
-              material.unit = value;
-              break;
-            case 'Birim Fiyat':
-              material.unitPrice = parseFloat(value.replace(',', '.')) || 0;
-              break;
-            case 'Mevcut Stok':
-              material.currentStock = parseInt(value) || 0;
-              break;
-            case 'Kritik Stok':
-              material.minStock = parseInt(value) || 0;
-              break;
-            case 'Tedarikçi':
-              material.supplier = value;
-              break;
-            case 'SKT':
-              material.expirationDate = value;
-              break;
-            case 'Seri No Durumu':
-              material.serialNoStatus = value;
-              break;
-            case 'Malzeme Açıklama':
-              material.materialDescription = value;
-              break;
-            case 'Statü':
-              material.status = value || 'normal';
-              break;
-          }
+          if (header === 'Malzeme Adı') material.name = value;
+          else if (header === 'Barkod') material.barcode = value;
+          else if (header === 'GTIN') material.gtin = value;
+          else if (header === 'SN') material.sn = value;
+          else if (header === 'UDI Code') material.udiCode = value;
+          else if (header === 'All Barcode') material.allBarcode = value;
+          else if (header === 'Kategori') material.category = value;
+          else if (header === 'Alt Kategori') material.subCategory = value;
+          else if (header === 'Birim') material.unit = value;
+          else if (header === 'Birim Fiyat') material.unitPrice = parseFloat(value.replace(',', '.')) || 0;
+          else if (header === 'Mevcut Stok') material.currentStock = parseInt(value) || 0;
+          else if (header === 'Kritik Stok') material.minStock = parseInt(value) || 0;
+          else if (header === 'Tedarikçi') material.supplier = value;
+          else if (header === 'SKT') material.expirationDate = value;
+          else if (header === 'Seri No Durumu') material.serialNoStatus = value;
+          else if (header === 'Malzeme Açıklama') material.materialDescription = value;
+          else if (header === 'Statü') material.status = value || 'normal';
         });
 
         if (!material.name) {

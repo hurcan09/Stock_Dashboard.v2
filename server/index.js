@@ -22,7 +22,7 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
       rejectUnauthorized: false
     }
   },
-  logging: false, // Console.log yerine false yaptım, daha temiz log
+  logging: false,
   pool: {
     max: 10,
     min: 0,
@@ -164,7 +164,7 @@ const Patient = sequelize.define('Patient', {
   updatedAt: 'updatedAt'
 });
 
-// Initialize Database - DÜZELTİLMİŞ
+// Initialize Database - DÜZELTİLMİŞ ve DEBUG EKLENDİ
 const initDatabase = async () => {
   try {
     await sequelize.authenticate();
@@ -174,18 +174,24 @@ const initDatabase = async () => {
     await sequelize.sync({ alter: true });
     console.log('✅ Database tabloları senkronize edildi.');
     
-    // Create default admin user - DÜZELTİLDİ!
+    // DEBUG: Tüm kullanıcıları göster
+    const [allUsers] = await sequelize.query('SELECT id, email, password FROM users');
+    console.log('👥 DEBUG: Mevcut kullanıcılar:', allUsers);
+    
+    // Create default admin user - DEBUG EKLENDİ
     try {
+      console.log('🔍 DEBUG: Admin user kontrolü başlıyor...');
       const adminUser = await User.findOne({ 
         where: { email: 'hurcanalkan@osmangazigoz.com' } 
       });
       
       if (!adminUser) {
+        console.log('🔍 DEBUG: Admin user bulunamadı, oluşturuluyor...');
         const hashedPassword = await bcrypt.hash('admin123', 10);
         await User.create({
           email: 'hurcanalkan@osmangazigoz.com',
           username: 'admin',
-          password: hashedPassword, // DÜZELTİLDİ: '123456' yerine hashedPassword
+          password: hashedPassword,
           name: 'Hürcan Alkan',
           department: 'Yönetim',
           role: 'admin',
@@ -202,9 +208,11 @@ const initDatabase = async () => {
         console.log('✅ Default admin user created. Password: admin123');
       } else {
         console.log('✅ Admin user already exists.');
+        console.log('🔍 DEBUG: Admin password hash:', adminUser.password.substring(0, 30) + '...');
         
         // Admin şifresini güncelle (eğer yanlış şifreyle oluştuysa)
-        if (adminUser.password === '123456') {
+        if (adminUser.password === '123456' || adminUser.password.length < 20) {
+          console.log('🔍 DEBUG: Admin password needs update');
           const hashedPassword = await bcrypt.hash('admin123', 10);
           await adminUser.update({ password: hashedPassword });
           console.log('✅ Admin password updated to: admin123');
@@ -239,6 +247,36 @@ const initDatabase = async () => {
       }
     }
     
+    // DEBUG USER - Plain text password ile
+    try {
+      const [debugUser] = await sequelize.query(
+        'SELECT id FROM users WHERE email = $1',
+        { replacements: ['debug@hospital.com'] }
+      );
+      
+      if (debugUser.length === 0) {
+        await sequelize.query(
+          `INSERT INTO users (email, username, password, name, department, role, permissions, "isActive") 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          {
+            replacements: [
+              'debug@hospital.com',
+              'debug',
+              'debug123', // PLAIN TEXT!
+              'Debug User',
+              'IT',
+              'admin',
+              JSON.stringify({ all: true }),
+              true
+            ]
+          }
+        );
+        console.log('✅ DEBUG user created: debug@hospital.com / debug123 (PLAIN TEXT)');
+      }
+    } catch (debugError) {
+      console.log('⚠️  Debug user error:', debugError.message);
+    }
+    
     console.log('✅ Database initialization completed.');
   } catch (error) {
     console.error('❌ Database initialization error:', error.message);
@@ -267,64 +305,109 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Login - GELİŞTİRİLMİŞ
+// Login - DEBUG MODU EKLENDİ
 app.post('/api/auth/login', async (req, res) => {
+  console.log('🔍 LOGIN DEBUG === START ===');
+  console.log('📧 Email:', req.body.email);
+  console.log('🔑 Password:', req.body.password);
+  
   try {
     const { email, password } = req.body;
     
     if (!email || !password) {
+      console.log('❌ Missing email or password');
       return res.status(400).json({ error: 'Email ve şifre gereklidir' });
     }
     
-    const user = await User.findOne({ 
-      where: { 
-        [Op.or]: [
-          { email: email },
-          { username: email }
-        ],
-        isActive: true 
-      } 
-    });
-
-    if (!user) {
+    // DEBUG: Direkt SQL query
+    console.log('🔍 Database query for:', email);
+    const [users] = await sequelize.query(
+      'SELECT * FROM users WHERE email = $1 AND "isActive" = true',
+      { replacements: [email] }
+    );
+    
+    console.log('🔍 Users found:', users.length);
+    
+    if (users.length === 0) {
+      console.log('❌ No user found with email:', email);
       return res.status(401).json({ error: 'Geçersiz email veya şifre' });
     }
-
-    // Şifre kontrolü
-    let validPassword;
+    
+    const user = users[0];
+    console.log('👤 User found:', user.email);
+    console.log('🗝️  Stored password (first 30):', user.password.substring(0, 30));
+    console.log('🔢 Password length:', user.password.length);
+    
+    // ÇOKLU ŞİFRE KONTROLÜ
+    let passwordValid = false;
+    
+    // 1. Bcrypt kontrol
     try {
-      validPassword = await bcrypt.compare(password, user.password);
+      console.log('🔄 Trying bcrypt compare...');
+      passwordValid = await bcrypt.compare(password, user.password);
+      console.log('🔍 Bcrypt result:', passwordValid);
     } catch (bcryptError) {
-      console.error('Password comparison error:', bcryptError);
-      return res.status(401).json({ error: 'Geçersiz email veya şifre' });
+      console.log('⚠️  Bcrypt error:', bcryptError.message);
     }
-
-    if (!validPassword) {
-      // Eski yanlış şifre kontrolü (123456)
-      if (user.password === '123456' && password === 'admin123') {
-        // Şifreyi güncelle
-        const hashedPassword = await bcrypt.hash('admin123', 10);
-        await user.update({ password: hashedPassword });
-        console.log(`✅ Password updated for user: ${user.email}`);
-      } else {
-        return res.status(401).json({ error: 'Geçersiz email veya şifre' });
+    
+    // 2. Plain text kontrol (acil durum)
+    if (!passwordValid) {
+      console.log('🔄 Trying plain text compare...');
+      if (user.password === password) {
+        console.log('✅ PLAIN TEXT PASSWORD MATCH!');
+        passwordValid = true;
+        
+        // Plain text şifreyi hash'le
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await sequelize.query(
+          'UPDATE users SET password = $1 WHERE id = $2',
+          { replacements: [hashedPassword, user.id] }
+        );
+        console.log('🔧 Password hashed and updated in database');
       }
     }
-
+    
+    // 3. Özel durum: "123456" -> "admin123"
+    if (!passwordValid && user.password === '123456' && password === 'admin123') {
+      console.log('✅ Special case: 123456 -> admin123');
+      passwordValid = true;
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await sequelize.query(
+        'UPDATE users SET password = $1 WHERE id = $2',
+        { replacements: [hashedPassword, user.id] }
+      );
+    }
+    
+    if (!passwordValid) {
+      console.log('❌ All password checks failed');
+      console.log('🔍 LOGIN DEBUG === END WITH FAILURE ===');
+      return res.status(401).json({ error: 'Geçersiz email veya şifre' });
+    }
+    
+    console.log('✅ Password validation successful');
+    
+    // Token oluştur
     const token = jwt.sign(
       {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
-        permissions: user.permissions
+        permissions: user.permissions || {}
       },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
-
-    await user.update({ lastLogin: new Date() });
-
+    
+    // Son giriş zamanını güncelle
+    await sequelize.query(
+      'UPDATE users SET "lastLogin" = CURRENT_TIMESTAMP WHERE id = $1',
+      { replacements: [user.id] }
+    );
+    
+    console.log('✅ Token created successfully');
+    console.log('🔍 LOGIN DEBUG === END WITH SUCCESS ===');
+    
     res.json({
       success: true,
       token,
@@ -336,26 +419,38 @@ app.post('/api/auth/login', async (req, res) => {
         department: user.department,
         avatarColor: user.avatarColor,
         phone: user.phone,
-        permissions: user.permissions
+        permissions: user.permissions || {}
       }
     });
+    
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('🔥 LOGIN ERROR:', error);
+    console.log('🔍 LOGIN DEBUG === END WITH ERROR ===');
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
 // Emergency login endpoint (şifre sıfırlama için)
 app.post('/api/auth/emergency-login', async (req, res) => {
+  console.log('🚨 EMERGENCY LOGIN CALLED');
+  
   try {
     const { email } = req.body;
     
-    // Sadece belirli IP'lerden veya development'ta çalışsın
-    const user = await User.findOne({ where: { email } });
+    console.log('🔍 Emergency login for:', email);
     
-    if (!user) {
+    const [users] = await sequelize.query(
+      'SELECT * FROM users WHERE email = $1',
+      { replacements: [email] }
+    );
+    
+    if (users.length === 0) {
+      console.log('❌ User not found for emergency login');
       return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
     }
+    
+    const user = users[0];
+    console.log('👤 Emergency user found:', user.email);
     
     // Yeni token oluştur
     const token = jwt.sign(
@@ -364,11 +459,13 @@ app.post('/api/auth/emergency-login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        permissions: user.permissions
+        permissions: user.permissions || {}
       },
       JWT_SECRET,
       { expiresIn: '1h' }
     );
+    
+    console.log('✅ Emergency token created');
     
     res.json({
       success: true,
@@ -376,6 +473,7 @@ app.post('/api/auth/emergency-login', async (req, res) => {
       message: 'Emergency login successful'
     });
   } catch (error) {
+    console.error('Emergency login error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -625,9 +723,15 @@ const startServer = async () => {
     console.log(`📍 Database: PostgreSQL (Neon.tech)`);
     console.log(`📍 Environment: ${process.env.NODE_ENV}`);
     console.log('=========================================');
-    console.log('👤 Admin Login:');
-    console.log(`   Email: hurcanalkan@osmangazigoz.com`);
-    console.log(`   Password: admin123`);
+    console.log('👤 TEST LOGINS:');
+    console.log(`   1. Email: hurcanalkan@osmangazigoz.com`);
+    console.log(`      Password: admin123 (or 123456 if plain text)`);
+    console.log(`   2. Email: debug@hospital.com`);
+    console.log(`      Password: debug123 (PLAIN TEXT)`);
+    console.log(`   3. Email: admin@hospital.com`);
+    console.log(`      Password: admin123`);
+    console.log('=========================================');
+    console.log('🔍 DEBUG MODE: ACTIVE - Check Render Logs');
     console.log('=========================================');
   });
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, User, Edit2, ShoppingCart, Eye, Trash2, Barcode, FileText, Download, Filter } from 'lucide-react';
+import { Plus, Search, User, Edit2, ShoppingCart, Eye, Trash2, Barcode, FileText, Download, Filter, RefreshCw } from 'lucide-react';
 import { Patient, PatientMaterialUsage, Material } from '../types';
 import { dataService } from '../utils/dataService';
 
@@ -16,11 +16,20 @@ export default function PatientManagement() {
 
   useEffect(() => {
     loadPatients();
-    setMaterials(dataService.getMaterials());
+    loadMaterials();
   }, []);
 
   const loadPatients = () => {
     setPatients(dataService.getPatients());
+  };
+
+  const loadMaterials = () => {
+    setMaterials(dataService.getMaterials());
+  };
+
+  // Malzeme arama fonksiyonu - SN numarasına göre
+  const searchMaterialBySN = (serialNumber: string) => {
+    return materials.find(m => m.serialNumber === serialNumber);
   };
 
   // Filtreleme fonksiyonu - sütun filtreleri ve arama terimini birleştirir
@@ -142,10 +151,17 @@ export default function PatientManagement() {
         throw new Error(`Yetersiz stok! Mevcut stok: ${material.currentStock}`);
       }
 
+      // SKT kontrolü
+      if (material.expiryDate && new Date(material.expiryDate) < new Date()) {
+        throw new Error(`Bu ürünün son kullanma tarihi geçmiş! SKT: ${new Date(material.expiryDate).toLocaleDateString('tr-TR')}`);
+      }
+
       // Malzeme kullanımını kaydet
       const patientUsage: Omit<PatientMaterialUsage, 'id'> = {
         patientId: selectedPatient.id,
         materialId: material.id,
+        materialName: material.name,
+        serialNumber: material.serialNumber,
         quantity: usageData.quantity,
         unitPrice: material.unitPrice,
         totalCost: usageData.quantity * material.unitPrice,
@@ -170,7 +186,7 @@ export default function PatientManagement() {
       });
 
       loadPatients();
-      setMaterials(dataService.getMaterials()); // Malzeme listesini güncelle
+      loadMaterials(); // Malzeme listesini güncelle
       setShowQuickUsage(false);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Bir hata oluştu!';
@@ -178,30 +194,73 @@ export default function PatientManagement() {
     }
   };
 
-  // Klasik malzeme kullanımı fonksiyonu
-  const handleAddMaterialUsage = (usage: Omit<PatientMaterialUsage, 'id'>) => {
-    dataService.savePatientMaterialUsage(usage);
-    
-    const material = materials.find(m => m.id === usage.materialId);
-    const patient = patients.find(p => p.id === usage.patientId);
-    
-    // Stok güncelle
-    if (material) {
-      dataService.updateMaterial(material.id, {
-        currentStock: material.currentStock - usage.quantity
-      });
-    }
-    
-    dataService.logAction({
-      action: 'MALZEME_KULLANIMI',
-      module: 'HASTA_YÖNETİMİ',
-      recordId: usage.materialId,
-      details: `${patient?.name} ${patient?.surname} hastası için ${material?.name} kullanıldı - Miktar: ${usage.quantity} - İşlem Ücreti: ₺${usage.procedureFee || 0}`,
-      performedBy: 'System',
-    });
+  // SN ile malzeme kullanımı fonksiyonu
+  const handleAddMaterialUsageWithSN = (usageData: {
+    serialNumber: string;
+    quantity: number;
+    notes: string;
+    procedureFee?: number;
+  }) => {
+    if (!selectedPatient) return;
 
-    setMaterials(dataService.getMaterials());
-    setShowMaterialUsage(false);
+    try {
+      // SN ile malzeme bul
+      const material = searchMaterialBySN(usageData.serialNumber);
+      if (!material) {
+        throw new Error('Bu SN numarasına ait malzeme bulunamadı! Lütfen malzeme yönetimi sayfasında bu SN numarasına sahip ürün olduğundan emin olun.');
+      }
+
+      // Stok kontrolü
+      if (material.currentStock === 0) {
+        throw new Error('Bu ürünün stoğu tükenmiş!');
+      }
+
+      // Miktar kontrolü
+      if (usageData.quantity > material.currentStock) {
+        throw new Error(`Yetersiz stok! Mevcut stok: ${material.currentStock} ${material.unit}`);
+      }
+
+      // SKT kontrolü
+      if (material.expiryDate && new Date(material.expiryDate) < new Date()) {
+        throw new Error(`Bu ürünün son kullanma tarihi geçmiş! SKT: ${new Date(material.expiryDate).toLocaleDateString('tr-TR')}`);
+      }
+
+      // Malzeme kullanımını kaydet
+      const patientUsage: Omit<PatientMaterialUsage, 'id'> = {
+        patientId: selectedPatient.id,
+        materialId: material.id,
+        materialName: material.name,
+        serialNumber: material.serialNumber,
+        quantity: usageData.quantity,
+        unitPrice: material.unitPrice,
+        totalCost: usageData.quantity * material.unitPrice,
+        usageDate: new Date().toISOString(),
+        notes: usageData.notes,
+        procedureFee: usageData.procedureFee || 0,
+      };
+
+      dataService.savePatientMaterialUsage(patientUsage);
+
+      // Stok güncelle
+      dataService.updateMaterial(material.id, {
+        currentStock: material.currentStock - usageData.quantity
+      });
+
+      dataService.logAction({
+        action: 'MALZEME_KULLANIMI',
+        module: 'HASTA_YÖNETİMİ',
+        recordId: usageData.serialNumber,
+        details: `${selectedPatient.name} ${selectedPatient.surname} hastası için ${material.name} (SN: ${usageData.serialNumber}) kullanıldı - Miktar: ${usageData.quantity} - İşlem Ücreti: ₺${usageData.procedureFee || 0}`,
+        performedBy: 'System',
+      });
+
+      loadPatients();
+      loadMaterials(); // Malzeme listesini güncelle
+      setShowMaterialUsage(false);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Bir hata oluştu!';
+      alert(errorMessage);
+    }
   };
 
   // Hasta başına toplam maliyet hesaplama (malzeme + işlem ücreti)
@@ -266,7 +325,8 @@ export default function PatientManagement() {
       ${usages.length > 0 ? usages.map((usage, index) => {
         const material = materials.find(m => m.id === usage.materialId);
         return `
-        ${index + 1}. ${material?.name || 'Bilinmeyen Malzeme'}
+        ${index + 1}. ${usage.materialName || material?.name || 'Bilinmeyen Malzeme'}
+           SN: ${usage.serialNumber || '-'}
            Tarih: ${new Date(usage.usageDate).toLocaleDateString('tr-TR')}
            Miktar: ${usage.quantity} ${material?.unit || 'adet'}
            Birim Fiyat: ₺${usage.unitPrice.toFixed(2)}
@@ -299,6 +359,14 @@ export default function PatientManagement() {
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">Hasta Yönetimi</h2>
         <div className="flex space-x-2">
+          <button
+            onClick={loadMaterials}
+            className="bg-gray-600/90 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+            title="Malzeme Listesini Yenile"
+          >
+            <RefreshCw className="h-5 w-5" />
+            <span>Malzemeleri Yenile</span>
+          </button>
           <button
             onClick={handleExportExcel}
             className="bg-green-600/90 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
@@ -481,14 +549,14 @@ export default function PatientManagement() {
                         <Barcode className="h-4 w-4" />
                       </button>
                       
-                      {/* Klasik Malzeme Kullanım Butonu */}
+                      {/* SN ile Malzeme Kullanım Butonu */}
                       <button
                         onClick={() => {
                           setSelectedPatient(patient);
                           setShowMaterialUsage(true);
                         }}
                         className="text-orange-600 hover:text-orange-800 p-1 transition-colors"
-                        title="Malzeme Kullanımı"
+                        title="SN ile Malzeme Kullanımı"
                       >
                         <ShoppingCart className="h-4 w-4" />
                       </button>
@@ -576,12 +644,12 @@ export default function PatientManagement() {
         />
       )}
 
-      {/* Klasik Malzeme Kullanım Modal */}
+      {/* SN ile Malzeme Kullanım Modal */}
       {showMaterialUsage && selectedPatient && (
-        <MaterialUsageModal
+        <SNMaterialUsageModal
           patient={selectedPatient}
           materials={materials}
-          onSave={handleAddMaterialUsage}
+          onSave={handleAddMaterialUsageWithSN}
           onClose={() => {
             setShowMaterialUsage(false);
             setSelectedPatient(null);
@@ -804,7 +872,7 @@ function QuickMaterialUsageModal({ patient, materials, onSave, onClose }: QuickM
                 <div><span className="font-medium">Kategori:</span> {currentMaterial.category}</div>
                 <div><span className="font-medium">Mevcut Stok:</span> {currentMaterial.currentStock} {currentMaterial.unit}</div>
                 <div><span className="font-medium">Birim Fiyat:</span> ₺{currentMaterial.unitPrice.toFixed(2)}</div>
-                <div><span className="font-medium">Tedarikçi:</span> {currentMaterial.supplier}</div>
+                <div><span className="font-medium">SN:</span> {currentMaterial.serialNumber || '-'}</div>
                 <div><span className="font-medium">Toplam:</span> ₺{(currentMaterial.unitPrice * quantity).toFixed(2)}</div>
               </div>
             </div>
@@ -879,69 +947,123 @@ function QuickMaterialUsageModal({ patient, materials, onSave, onClose }: QuickM
   );
 }
 
-// Klasik Malzeme Kullanım Modal Component
-interface MaterialUsageModalProps {
+// SN ile Malzeme Kullanım Modal Component
+interface SNMaterialUsageModalProps {
   patient: Patient;
   materials: Material[];
-  onSave: (usage: Omit<PatientMaterialUsage, 'id'>) => void;
+  onSave: (usage: { serialNumber: string; quantity: number; notes: string; procedureFee?: number }) => void;
   onClose: () => void;
 }
 
-function MaterialUsageModal({ patient, materials, onSave, onClose }: MaterialUsageModalProps) {
-  const [selectedMaterialId, setSelectedMaterialId] = useState('');
+function SNMaterialUsageModal({ patient, materials, onSave, onClose }: SNMaterialUsageModalProps) {
+  const [serialNumber, setSerialNumber] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
   const [procedureFee, setProcedureFee] = useState<number>(0);
+  const [availableMaterials, setAvailableMaterials] = useState<Material[]>([]);
 
-  const selectedMaterial = materials.find(m => m.id === selectedMaterialId);
-  const totalCost = selectedMaterial ? selectedMaterial.unitPrice * quantity : 0;
-  const totalWithFee = totalCost + procedureFee;
+  useEffect(() => {
+    // Sadece stokta olan malzemeleri filtrele
+    const filteredMaterials = materials.filter(m => 
+      m.serialNumber && 
+      m.serialNumber.trim() !== '' && 
+      m.currentStock > 0 &&
+      (!m.expiryDate || new Date(m.expiryDate) >= new Date())
+    );
+    setAvailableMaterials(filteredMaterials);
+  }, [materials]);
+
+  const currentMaterial = materials.find(m => m.serialNumber === serialNumber);
+
+  // SN numarası değiştiğinde otomatik malzeme bilgilerini getir
+  useEffect(() => {
+    if (currentMaterial) {
+      // Otomatik olarak birim fiyatı getir
+      // Quantity değiştiğinde toplam fiyat otomatik hesaplanır
+    }
+  }, [serialNumber, currentMaterial]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMaterial) return;
-
-    if (selectedMaterial.currentStock < quantity) {
-      alert('Yetersiz stok! Mevcut stok: ' + selectedMaterial.currentStock);
+    if (!serialNumber) {
+      alert('Lütfen SN numarası giriniz!');
       return;
     }
 
-
-    setSelectedMaterialId('');
+    onSave({ serialNumber, quantity, notes, procedureFee });
+    setSerialNumber('');
     setQuantity(1);
     setNotes('');
     setProcedureFee(0);
   };
 
+  // Stok kontrolü
+  const isValidMaterial = currentMaterial && 
+                         currentMaterial.currentStock > 0 && 
+                         (!currentMaterial.expiryDate || new Date(currentMaterial.expiryDate) >= new Date());
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-2xl p-6 w-full max-w-md mx-4 border border-gray-200/60">
         <h3 className="text-lg font-semibold mb-4 text-gray-800">
-          Malzeme Kullanımı - {patient.name} {patient.surname}
+          SN ile Malzeme Kullanımı - {patient.name} {patient.surname}
         </h3>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Malzeme *
+              SN Numarası *
             </label>
-            <select
+            <input
+              type="text"
               required
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-              value={selectedMaterialId}
-              onChange={(e) => setSelectedMaterialId(e.target.value)}
-            >
-              <option value="">Malzeme seçiniz</option>
-              {materials
-                .filter(m => m.currentStock > 0)
-                .map(material => (
-                  <option key={material.id} value={material.id}>
-                    {material.name} - Stok: {material.currentStock} {material.unit} - ₺{material.unitPrice}
-                  </option>
-                ))}
-            </select>
+              value={serialNumber}
+              onChange={(e) => setSerialNumber(e.target.value)}
+              placeholder="SN numarasını girin (Örnek: SN123456)"
+              autoFocus
+              list="sn-list"
+            />
+            <datalist id="sn-list">
+              {availableMaterials.map(material => (
+                <option key={material.id} value={material.serialNumber || ''}>
+                  {material.name} - Stok: {material.currentStock}
+                </option>
+              ))}
+            </datalist>
+            <p className="text-xs text-gray-500 mt-1">
+              Malzeme yönetimi sayfasında kayıtlı SN numaralarından birini girin
+            </p>
           </div>
-          
+
+          {currentMaterial && (
+            <div className={`p-3 rounded-lg border ${isValidMaterial ? 'bg-green-50/80 border-green-200' : 'bg-red-50/80 border-red-200'}`}>
+              <h4 className="font-semibold mb-2">Malzeme Bilgileri</h4>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><span className="font-medium">Ad:</span> {currentMaterial.name}</div>
+                <div><span className="font-medium">Kategori:</span> {currentMaterial.category}</div>
+                <div><span className="font-medium">Mevcut Stok:</span> {currentMaterial.currentStock} {currentMaterial.unit}</div>
+                <div><span className="font-medium">Birim Fiyat:</span> ₺{currentMaterial.unitPrice.toFixed(2)}</div>
+                <div><span className="font-medium">Barkod:</span> {currentMaterial.barcode || '-'}</div>
+                <div><span className="font-medium">Tedarikçi:</span> {currentMaterial.supplier}</div>
+                {currentMaterial.expiryDate && (
+                  <div><span className="font-medium">SKT:</span> {new Date(currentMaterial.expiryDate).toLocaleDateString('tr-TR')}</div>
+                )}
+                <div><span className="font-medium">Toplam:</span> ₺{(currentMaterial.unitPrice * quantity).toFixed(2)}</div>
+              </div>
+              
+              {!isValidMaterial && (
+                <div className="mt-2 p-2 bg-red-100 rounded text-red-800 text-sm">
+                  {currentMaterial.currentStock === 0 ? (
+                    <p>❌ Bu ürünün stoğu tükenmiş!</p>
+                  ) : currentMaterial.expiryDate && new Date(currentMaterial.expiryDate) < new Date() ? (
+                    <p>❌ Bu ürünün son kullanma tarihi geçmiş! SKT: {new Date(currentMaterial.expiryDate).toLocaleDateString('tr-TR')}</p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Miktar *
@@ -954,13 +1076,13 @@ function MaterialUsageModal({ patient, materials, onSave, onClose }: MaterialUsa
               value={quantity}
               onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
             />
-            {selectedMaterial && quantity > selectedMaterial.currentStock && (
+            {currentMaterial && quantity > currentMaterial.currentStock && (
               <p className="text-red-600 text-sm mt-1">
-                Yetersiz stok! Mevcut: {selectedMaterial.currentStock} {selectedMaterial.unit}
+                Yetersiz stok! Mevcut: {currentMaterial.currentStock} {currentMaterial.unit}
               </p>
             )}
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               İşlem Ücreti (₺)
@@ -975,7 +1097,7 @@ function MaterialUsageModal({ patient, materials, onSave, onClose }: MaterialUsa
               placeholder="İşlem ücretini girin"
             />
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Notlar
@@ -988,25 +1110,11 @@ function MaterialUsageModal({ patient, materials, onSave, onClose }: MaterialUsa
               placeholder="Kullanım nedeni, prosedür vb."
             />
           </div>
-          
-          {(totalCost > 0 || procedureFee > 0) && (
-            <div className="bg-blue-50/80 p-3 rounded-lg">
-              <p className="text-sm text-blue-800">
-                Malzeme Maliyeti: <span className="font-semibold">₺{totalCost.toFixed(2)}</span>
-              </p>
-              <p className="text-sm text-blue-800">
-                İşlem Ücreti: <span className="font-semibold">₺{procedureFee.toFixed(2)}</span>
-              </p>
-              <p className="text-sm text-blue-800 font-bold">
-                Toplam: <span className="font-semibold">₺{totalWithFee.toFixed(2)}</span>
-              </p>
-            </div>
-          )}
-          
+
           <div className="flex space-x-3 pt-4">
             <button
               type="submit"
-              disabled={!selectedMaterial || quantity > (selectedMaterial?.currentStock || 0)}
+              disabled={!serialNumber || !isValidMaterial || quantity > (currentMaterial?.currentStock || 0)}
               className="flex-1 bg-green-600/90 hover:bg-green-700 disabled:bg-gray-400 text-white py-2 px-4 rounded-lg font-medium transition-colors"
             >
               Kullanımı Kaydet
@@ -1112,6 +1220,7 @@ function PatientDetails({ patient, usages, materials, onClose, onExport }: Patie
                   <tr className="border-b border-gray-200">
                     <th className="text-left py-2 px-4 font-semibold text-gray-700">Tarih</th>
                     <th className="text-left py-2 px-4 font-semibold text-gray-700">Malzeme</th>
+                    <th className="text-left py-2 px-4 font-semibold text-gray-700">SN Numarası</th>
                     <th className="text-left py-2 px-4 font-semibold text-gray-700">Barkod</th>
                     <th className="text-left py-2 px-4 font-semibold text-gray-700">Miktar</th>
                     <th className="text-left py-2 px-4 font-semibold text-gray-700">Birim Fiyat</th>
@@ -1132,12 +1241,15 @@ function PatientDetails({ patient, usages, materials, onClose, onExport }: Patie
                           {new Date(usage.usageDate).toLocaleDateString('tr-TR')}
                         </td>
                         <td className="py-2 px-4 text-sm">
-                          {getMaterialName(usage.materialId)}
+                          {usage.materialName || getMaterialName(usage.materialId)}
                           {material && (
                             <div className="text-xs text-gray-500">
                               {material.category} • {material.supplier}
                             </div>
                           )}
+                        </td>
+                        <td className="py-2 px-4 text-sm font-mono">
+                          {usage.serialNumber || '-'}
                         </td>
                         <td className="py-2 px-4 text-sm text-gray-600">
                           {getMaterialBarcode(usage.materialId)}
@@ -1162,7 +1274,7 @@ function PatientDetails({ patient, usages, materials, onClose, onExport }: Patie
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50/60">
-                    <td colSpan={5} className="py-3 px-4 text-right font-semibold">Genel Toplam:</td>
+                    <td colSpan={6} className="py-3 px-4 text-right font-semibold">Genel Toplam:</td>
                     <td className="py-3 px-4 font-semibold">₺{totalMaterialCost.toFixed(2)}</td>
                     <td className="py-3 px-4 font-semibold">₺{totalProcedureFee.toFixed(2)}</td>
                     <td className="py-3 px-4 font-bold text-green-600">₺{totalCost.toFixed(2)}</td>

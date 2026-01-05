@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="description" content="Osmangazi Göz Hastanesi Stok Takip Sistemi - Gelişmiş malzeme ve hasta yönetim sistemi">
     <meta name="keywords" content="stok takip, hastane, malzeme yönetimi, hasta takip, osmangazi göz">
     <meta name="author" content="Osmangazi Göz Hastanesi">
@@ -58,7 +63,7 @@
         background: white;
       }
 
-      /* SIDEBAR - KOYU LACİVERT */
+      /* SIDEBAR - KOYU LACİVERT - DÜZELTİLMİŞ */
       .sidebar-dashboard {
         width: var(--sidebar-width);
         background: linear-gradient(180deg, var(--color-primary-dark) 0%, var(--color-primary) 100%);
@@ -67,8 +72,17 @@
         left: 0;
         top: 0;
         height: 100vh;
-        z-index: 100;
+        z-index: 1000;
         box-shadow: 0 4px 20px rgba(15, 27, 93, 0.2);
+        overflow-x: hidden;
+        overflow-y: auto;
+        transition: transform 0.3s ease;
+        will-change: transform;
+      }
+
+      /* Sidebar hover kontrolü */
+      .sidebar-dashboard:hover {
+        transform: translateX(0);
       }
 
       .sidebar-content {
@@ -76,6 +90,7 @@
         height: 100%;
         display: flex;
         flex-direction: column;
+        width: var(--sidebar-width);
       }
 
       /* Logo Alanı - Turuncu Logo */
@@ -98,6 +113,7 @@
         color: white;
         font-size: 18px;
         font-weight: 700;
+        white-space: nowrap;
       }
 
       /* Navigation Menu */
@@ -148,9 +164,11 @@
         height: var(--header-height);
         background: linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary) 100%);
         border-bottom: 3px solid var(--color-secondary);
-        position: sticky;
+        position: fixed;
         top: 0;
-        z-index: 90;
+        left: var(--sidebar-width);
+        right: 0;
+        z-index: 900;
         box-shadow: 0 4px 20px rgba(15, 27, 93, 0.2);
       }
 
@@ -160,7 +178,7 @@
         justify-content: space-between;
         align-items: center;
         padding: 0 32px;
-        max-width: 100%;
+        width: 100%;
       }
 
       /* User Info */
@@ -234,8 +252,10 @@
       .main-content-dashboard {
         flex: 1;
         margin-left: var(--sidebar-width);
-        min-height: 100vh;
+        margin-top: var(--header-height);
+        min-height: calc(100vh - var(--header-height));
         background: var(--color-bg-content);
+        width: calc(100% - var(--sidebar-width));
       }
 
       .dashboard-content {
@@ -512,12 +532,24 @@
       @media (max-width: 768px) {
         .sidebar-dashboard {
           width: 100%;
-          position: relative;
-          height: auto;
+          position: fixed;
+          height: 100vh;
+          transform: translateX(-100%);
+          z-index: 1100;
+        }
+        
+        .sidebar-dashboard.active {
+          transform: translateX(0);
         }
 
         .main-content-dashboard {
           margin-left: 0;
+          width: 100%;
+        }
+
+        .header-dashboard {
+          left: 0;
+          width: 100%;
         }
 
         .dashboard-container {

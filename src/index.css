@@ -33,6 +33,11 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Cache kontrolü için */
+  :root {
+    --cache-buster: none;
+  }
+
   /* Force black text for all elements */
   .text-black-force {
     color: var(--color-text-dark) !important;
@@ -66,6 +71,17 @@
     border-color: var(--color-secondary) !important;
     outline-color: var(--color-secondary) !important;
     box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1) !important;
+  }
+
+  /* Tarayıcı cache önleyici */
+  .cache-buster {
+    animation: cachePulse 1s;
+  }
+
+  @keyframes cachePulse {
+    0% { opacity: 0.99; }
+    50% { opacity: 1; }
+    100% { opacity: 0.99; }
   }
 
   /* Custom scrollbar for entire application */

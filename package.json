@@ -3,9 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
     "start": "node server/index.js"
   },
   "dependencies": {
@@ -20,11 +18,11 @@
     "pg": "^8.11.3",
     "sequelize": "^6.35.1",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "vite": "^5.0.12",
+    "@vitejs/plugin-react": "^4.2.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.12",
     "typescript": "^5.3.3",
     "@types/react": "^18.2.47",
     "@types/react-dom": "^18.2.18"

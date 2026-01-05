@@ -1,17 +1,12 @@
 {
   "name": "stock-dashboard",
-  "private": true,
   "version": "1.0.0",
-  "type": "module",
+  "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build --emptyOutDir",
-    "lint": "eslint .",
+    "build": "vite build",
     "preview": "vite preview",
-    "start": "node server/index.js",
-    "server": "node server/index.js",
-    "clean": "rm -rf dist node_modules/.cache",
-    "rebuild": "npm run clean && npm install && npm run build"
+    "start": "node server/index.js"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -25,33 +20,14 @@
     "pg": "^8.11.3",
     "sequelize": "^6.35.1",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "multer": "^1.4.5-lts.1",
-    "helmet": "^7.1.0",
-    "morgan": "^1.10.0",
-    "compression": "^1.7.4",
-    "express-validator": "^7.0.1"
+    "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "@types/react": "^18.2.47",
-    "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
-    "autoprefixer": "^10.4.16",
-    "eslint": "^8.56.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.6",
-    "postcss": "^8.4.33",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.3.3",
     "vite": "^5.0.12",
-    "@types/node": "^20.11.5",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/jsonwebtoken": "^9.0.5",
-    "@types/multer": "^1.4.11",
-    "@types/pg": "^8.10.9",
-    "@types/compression": "^1.7.5"
+    "typescript": "^5.3.3",
+    "@types/react": "^18.2.47",
+    "@types/react-dom": "^18.2.18"
   },
   "engines": {
     "node": ">=18.0.0"

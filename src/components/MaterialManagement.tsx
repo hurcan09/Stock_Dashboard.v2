@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Material, Category, Supplier, StockCount, StockCountSession, MaterialStatus } from '../types';
 import { dataService } from '../utils/dataService';
+import { dataServiceSQL } from '../utils/dataServiceSQL';
 
 // API servisi - Tüm tarayıcılarda veri senkronizasyonu için
 const API_BASE_URL = window.location.hostname === 'localhost' 

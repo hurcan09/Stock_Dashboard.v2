@@ -1,4 +1,4 @@
-// src/components/UserManagement.tsx - GÜNCELLENMİŞ VERSİYON
+// src/components/UserManagement.tsx - NEON SQL BAĞLANTILI
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Users,
@@ -33,8 +33,66 @@ import {
   X,
   Info
 } from 'lucide-react';
-import { dataService } from '../utils/dataService';
 import { User, UserSession, SystemLog } from '../types';
+
+// API Client
+const API_BASE = 'https://stock-dashboard-p5ip.onrender.com/api';
+
+const apiClient = {
+  async getUsers(): Promise<User[]> {
+    const response = await fetch(`${API_BASE}/users`);
+    if (!response.ok) throw new Error('Kullanıcılar yüklenemedi');
+    return response.json();
+  },
+
+  async saveUser(userData: any): Promise<User> {
+    const response = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData)
+    });
+    if (!response.ok) throw new Error('Kullanıcı kaydedilemedi');
+    return response.json();
+  },
+
+  async updateUser(id: string, updates: any): Promise<User> {
+    const response = await fetch(`${API_BASE}/users/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (!response.ok) throw new Error('Kullanıcı güncellenemedi');
+    return response.json();
+  },
+
+  async deleteUser(id: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE}/users/${id}`, {
+      method: 'DELETE'
+    });
+    return response.ok;
+  },
+
+  async getUserSessions(): Promise<UserSession[]> {
+    const response = await fetch(`${API_BASE}/sessions`);
+    if (!response.ok) return [];
+    return response.json();
+  },
+
+  async getLogs(): Promise<SystemLog[]> {
+    const response = await fetch(`${API_BASE}/logs`);
+    if (!response.ok) return [];
+    return response.json();
+  },
+
+  async terminateSession(sessionId: string, reason?: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    return response.ok;
+  }
+};
 
 // Info Icon Component
 const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -141,23 +199,28 @@ export default function UserManagement() {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
 
   // Verileri yükle
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
-      const allUsers = dataService.getUsers();
+      // Kullanıcıları Neon SQL'den al
+      const allUsers = await apiClient.getUsers();
       setUsers(allUsers);
       setFilteredUsers(allUsers);
       setUniqueFilteredUsers(getUniqueUsersByLastLogin(allUsers));
       
-      const sessions = dataService.getUserSessions();
+      // Oturumları ve logları al (şimdilik boş)
+      const sessions = await apiClient.getUserSessions();
       setActiveSessions(sessions.filter(s => s.isActive));
       
-      const logs = dataService.getLogs().filter(log => 
+      const logs = await apiClient.getLogs();
+      const filteredLogs = logs.filter(log => 
         log.module === 'AUTH' || log.module === 'USER'
       ).slice(0, 10);
-      setActivityLogs(logs);
+      setActivityLogs(filteredLogs);
     } catch (err: any) {
       setError('Veriler yüklenirken bir hata oluştu: ' + err.message);
+      console.error('Veri yükleme hatası:', err);
     } finally {
       setLoading(false);
     }
@@ -211,7 +274,7 @@ export default function UserManagement() {
     setError('');
     
     try {
-      const newUser = dataService.saveUser({
+      const userData = {
         name: newUserForm.name,
         email: newUserForm.email,
         role: newUserForm.role,
@@ -236,7 +299,9 @@ export default function UserManagement() {
           importExcel: newUserForm.role === 'admin' || newUserForm.role === 'manager',
           manageDailyPlan: newUserForm.role === 'admin' || newUserForm.role === 'manager'
         }
-      } as User);
+      };
+
+      const newUser = await apiClient.saveUser(userData);
       
       setSuccess(`${newUser.name} başarıyla eklendi`);
       setNewUserForm({
@@ -249,7 +314,7 @@ export default function UserManagement() {
         phone: ''
       });
       setShowNewUserModal(false);
-      loadData();
+      await loadData();
       
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
@@ -280,12 +345,12 @@ export default function UserManagement() {
     setError('');
     
     try {
-      const updatedUser = dataService.updateUser(editingUser.id, editForm);
+      const updatedUser = await apiClient.updateUser(editingUser.id, editForm);
       
       if (updatedUser) {
         setSuccess(`${updatedUser.name} başarıyla güncellendi`);
         setShowEditModal(false);
-        loadData();
+        await loadData();
         
         setTimeout(() => setSuccess(''), 3000);
       }
@@ -319,17 +384,19 @@ export default function UserManagement() {
     setError('');
     
     try {
-      const updatedUser = dataService.updateUser(permissionUser.id, {
+      const updates = {
         permissions: {
           ...permissionUser.permissions,
           ...permissionForm
         }
-      });
+      };
+      
+      const updatedUser = await apiClient.updateUser(permissionUser.id, updates);
       
       if (updatedUser) {
         setSuccess(`${permissionUser.name} yetkileri güncellendi`);
         setShowPermissionModal(false);
-        loadData();
+        await loadData();
         
         setTimeout(() => setSuccess(''), 3000);
       }
@@ -341,58 +408,73 @@ export default function UserManagement() {
   };
 
   // Kullanıcı durumunu değiştirme
-  const handleToggleUserStatus = (userId: string) => {
+  const handleToggleUserStatus = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) return;
     
     if (window.confirm(`${user.name} kullanıcısının durumunu değiştirmek istiyor musunuz?`)) {
-      dataService.updateUser(userId, { isActive: !user.isActive });
-      setSuccess(`${user.name} durumu ${!user.isActive ? 'aktif' : 'pasif'} yapıldı`);
-      loadData();
-      
-      setTimeout(() => setSuccess(''), 3000);
+      try {
+        await apiClient.updateUser(userId, { isActive: !user.isActive });
+        setSuccess(`${user.name} durumu ${!user.isActive ? 'aktif' : 'pasif'} yapıldı`);
+        await loadData();
+        
+        setTimeout(() => setSuccess(''), 3000);
+      } catch (err: any) {
+        setError(err.message);
+      }
     }
   };
 
   // Kullanıcı silme
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) return;
     
     if (window.confirm(`${user.name} kullanıcısını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
-      const success = dataService.deleteUser(userId);
-      if (success) {
-        setSuccess(`${user.name} başarıyla silindi`);
-        loadData();
-        
-        setTimeout(() => setSuccess(''), 3000);
+      try {
+        const success = await apiClient.deleteUser(userId);
+        if (success) {
+          setSuccess(`${user.name} başarıyla silindi`);
+          await loadData();
+          
+          setTimeout(() => setSuccess(''), 3000);
+        }
+      } catch (err: any) {
+        setError(err.message);
       }
     }
   };
 
   // Oturum yönetimi
-  const handleTerminateSession = (sessionId: string, userName: string) => {
+  const handleTerminateSession = async (sessionId: string, userName: string) => {
     if (window.confirm(`${userName} oturumunu sonlandırmak istiyor musunuz?`)) {
-      dataService.terminateUserSession(sessionId, 'Yönetici tarafından sonlandırıldı');
-      setSuccess('Oturum sonlandırıldı');
-      loadData();
-      
-      setTimeout(() => setSuccess(''), 3000);
+      try {
+        await apiClient.terminateSession(sessionId, 'Yönetici tarafından sonlandırıldı');
+        setSuccess('Oturum sonlandırıldı');
+        await loadData();
+        
+        setTimeout(() => setSuccess(''), 3000);
+      } catch (err: any) {
+        setError(err.message);
+      }
     }
   };
 
-  const handleTerminateAllSessions = () => {
+  const handleTerminateAllSessions = async () => {
     if (window.confirm('Tüm aktif oturumları sonlandırmak istiyor musunuz?')) {
-      let count = 0;
-      activeSessions.forEach(session => {
-        if (dataService.terminateUserSession(session.id, 'Yönetici tarafından sonlandırıldı')) {
-          count++;
+      try {
+        let count = 0;
+        for (const session of activeSessions) {
+          const success = await apiClient.terminateSession(session.id, 'Yönetici tarafından sonlandırıldı');
+          if (success) count++;
         }
-      });
-      setSuccess(`${count} oturum sonlandırıldı`);
-      loadData();
-      
-      setTimeout(() => setSuccess(''), 3000);
+        setSuccess(`${count} oturum sonlandırıldı`);
+        await loadData();
+        
+        setTimeout(() => setSuccess(''), 3000);
+      } catch (err: any) {
+        setError(err.message);
+      }
     }
   };
 
@@ -438,43 +520,51 @@ export default function UserManagement() {
     }
   };
 
-  const handleBulkStatusChange = (status: boolean) => {
+  const handleBulkStatusChange = async (status: boolean) => {
     if (selectedUsers.length === 0) {
       setError('Lütfen en az bir kullanıcı seçin');
       return;
     }
     
     if (window.confirm(`${selectedUsers.length} kullanıcının durumunu ${status ? 'aktif' : 'pasif'} yapmak istiyor musunuz?`)) {
-      selectedUsers.forEach(userId => {
-        dataService.updateUser(userId, { isActive: status });
-      });
-      
-      setSuccess(`${selectedUsers.length} kullanıcı ${status ? 'aktif' : 'pasif'} yapıldı`);
-      setSelectedUsers([]);
-      loadData();
-      
-      setTimeout(() => setSuccess(''), 3000);
+      try {
+        for (const userId of selectedUsers) {
+          await apiClient.updateUser(userId, { isActive: status });
+        }
+        
+        setSuccess(`${selectedUsers.length} kullanıcı ${status ? 'aktif' : 'pasif'} yapıldı`);
+        setSelectedUsers([]);
+        await loadData();
+        
+        setTimeout(() => setSuccess(''), 3000);
+      } catch (err: any) {
+        setError(err.message);
+      }
     }
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedUsers.length === 0) {
       setError('Lütfen en az bir kullanıcı seçin');
       return;
     }
     
     if (window.confirm(`${selectedUsers.length} kullanıcıyı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
-      let deletedCount = 0;
-      selectedUsers.forEach(userId => {
-        const success = dataService.deleteUser(userId);
-        if (success) deletedCount++;
-      });
-      
-      setSuccess(`${deletedCount} kullanıcı silindi`);
-      setSelectedUsers([]);
-      loadData();
-      
-      setTimeout(() => setSuccess(''), 3000);
+      try {
+        let deletedCount = 0;
+        for (const userId of selectedUsers) {
+          const success = await apiClient.deleteUser(userId);
+          if (success) deletedCount++;
+        }
+        
+        setSuccess(`${deletedCount} kullanıcı silindi`);
+        setSelectedUsers([]);
+        await loadData();
+        
+        setTimeout(() => setSuccess(''), 3000);
+      } catch (err: any) {
+        setError(err.message);
+      }
     }
   };
 
@@ -502,6 +592,16 @@ export default function UserManagement() {
           <div className="flex items-center">
             <CheckCircle className="h-5 w-5 mr-2" />
             <span>{success}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Yükleme durumu */}
+      {loading && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+          <div className="flex items-center">
+            <RefreshCw className="h-5 w-5 mr-2 animate-spin" />
+            <span>Veriler yükleniyor...</span>
           </div>
         </div>
       )}
@@ -760,7 +860,7 @@ export default function UserManagement() {
             </tbody>
           </table>
 
-          {uniqueFilteredUsers.length === 0 && (
+          {uniqueFilteredUsers.length === 0 && !loading && (
             <div className="text-center py-12">
               <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-700 font-medium">Kullanıcı bulunamadı</p>

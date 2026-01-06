@@ -1,3 +1,4 @@
+// index.js - TAM GÜNCELLENMİŞ VERSİYON
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -11,7 +12,7 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // PostgreSQL Database Connection
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
@@ -47,7 +48,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// JWT Authentication Middleware - GELİŞTİRİLMİŞ
+// JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
   // 1. Header'dan dene
   const authHeader = req.headers['authorization'];
@@ -108,14 +109,17 @@ const User = sequelize.define('User', {
   email: { type: DataTypes.STRING, unique: true, allowNull: false },
   username: { type: DataTypes.STRING, unique: true, allowNull: false },
   password: { type: DataTypes.STRING, allowNull: false },
-  name: { type: DataTypes.STRING, allowNull: false },
+  full_name: { type: DataTypes.STRING, allowNull: false },
   department: { type: DataTypes.STRING },
-  role: { type: DataTypes.STRING, defaultValue: 'user' },
-  avatarColor: { type: DataTypes.STRING },
+  role: { type: DataTypes.STRING, defaultValue: 'staff' },
+  avatar_color: { type: DataTypes.STRING, defaultValue: '#4F46E5' },
   phone: { type: DataTypes.STRING },
-  isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
-  lastLogin: { type: DataTypes.DATE },
-  lastLoginIp: { type: DataTypes.STRING },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  last_login: { type: DataTypes.DATE },
+  last_login_ip: { type: DataTypes.STRING },
+  session_timeout: { type: DataTypes.INTEGER, defaultValue: 30 },
+  can_view_pages: { type: DataTypes.JSONB, defaultValue: [] },
+  can_edit_pages: { type: DataTypes.JSONB, defaultValue: [] },
   permissions: { type: DataTypes.JSONB, defaultValue: {} }
 }, {
   tableName: 'users',
@@ -164,38 +168,66 @@ const Patient = sequelize.define('Patient', {
   updatedAt: 'updatedAt'
 });
 
-// Initialize Database - DÜZELTİLMİŞ ve DEBUG EKLENDİ
+// Oturum modeli
+const UserSession = sequelize.define('UserSession', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  userId: { type: DataTypes.INTEGER, allowNull: false },
+  userName: { type: DataTypes.STRING, allowNull: false },
+  userRole: { type: DataTypes.STRING, allowNull: false },
+  loginTime: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  lastActivity: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  ipAddress: { type: DataTypes.STRING },
+  userAgent: { type: DataTypes.TEXT },
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+  deviceInfo: { type: DataTypes.JSONB, defaultValue: {} }
+}, {
+  tableName: 'user_sessions',
+  timestamps: true
+});
+
+// Sistem log modeli
+const SystemLog = sequelize.define('SystemLog', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  action: { type: DataTypes.STRING, allowNull: false },
+  module: { type: DataTypes.STRING, allowNull: false },
+  recordId: { type: DataTypes.STRING, allowNull: false },
+  details: { type: DataTypes.TEXT, allowNull: false },
+  performedBy: { type: DataTypes.STRING, allowNull: false },
+  performedAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  ipAddress: { type: DataTypes.STRING },
+  userAgent: { type: DataTypes.TEXT }
+}, {
+  tableName: 'system_logs',
+  timestamps: false
+});
+
+// Initialize Database
 const initDatabase = async () => {
   try {
     await sequelize.authenticate();
     console.log('✅ PostgreSQL veritabanına bağlandı.');
     
-    // Tabloları oluştur (force: false - var olan tabloları silmez)
+    // Tabloları oluştur
     await sequelize.sync({ alter: true });
     console.log('✅ Database tabloları senkronize edildi.');
     
-    // DEBUG: Tüm kullanıcıları göster
-    const [allUsers] = await sequelize.query('SELECT id, email, password FROM users');
-    console.log('👥 DEBUG: Mevcut kullanıcılar:', allUsers);
-    
-    // Create default admin user - DEBUG EKLENDİ
+    // Varsayılan admin kullanıcısını kontrol et ve oluştur
     try {
-      console.log('🔍 DEBUG: Admin user kontrolü başlıyor...');
       const adminUser = await User.findOne({ 
-        where: { email: 'hurcanalkan@osmangazigoz.com' } 
+        where: { email: 'admin@osmangazigoz.com' } 
       });
       
       if (!adminUser) {
-        console.log('🔍 DEBUG: Admin user bulunamadı, oluşturuluyor...');
+        console.log('🔍 Admin user bulunamadı, oluşturuluyor...');
         const hashedPassword = await bcrypt.hash('admin123', 10);
         await User.create({
-          email: 'hurcanalkan@osmangazigoz.com',
+          email: 'admin@osmangazigoz.com',
           username: 'admin',
           password: hashedPassword,
-          name: 'Hürcan Alkan',
+          full_name: 'Sistem Yöneticisi',
           department: 'Yönetim',
           role: 'admin',
-          avatarColor: '#4F46E5',
+          avatar_color: '#4F46E5',
           permissions: {
             createSession: true, approveCounts: true, manageMaterials: true,
             managePatients: true, manageInvoices: true, bulkStatusChange: true,
@@ -203,78 +235,14 @@ const initDatabase = async () => {
             manageSettings: true, viewDashboard: true, importExcel: true,
             manageDailyPlan: true, viewReports: true
           },
-          isActive: true
+          is_active: true
         });
-        console.log('✅ Default admin user created. Password: admin123');
+        console.log('✅ Default admin user created: admin@osmangazigoz.com / admin123');
       } else {
-        console.log('✅ Admin user already exists.');
-        console.log('🔍 DEBUG: Admin password hash:', adminUser.password.substring(0, 30) + '...');
-        
-        // Admin şifresini güncelle (eğer yanlış şifreyle oluştuysa)
-        if (adminUser.password === '123456' || adminUser.password.length < 20) {
-          console.log('🔍 DEBUG: Admin password needs update');
-          const hashedPassword = await bcrypt.hash('admin123', 10);
-          await adminUser.update({ password: hashedPassword });
-          console.log('✅ Admin password updated to: admin123');
-        }
+        console.log('✅ Admin user zaten mevcut.');
       }
     } catch (userError) {
       console.error('❌ Admin user creation error:', userError.message);
-      
-      // Alternatif admin oluştur
-      try {
-        const hashedPassword = await bcrypt.hash('admin123', 10);
-        await User.create({
-          email: 'admin@hospital.com',
-          username: 'sysadmin',
-          password: hashedPassword,
-          name: 'System Administrator',
-          department: 'IT',
-          role: 'admin',
-          avatarColor: '#4F46E5',
-          permissions: {
-            createSession: true, approveCounts: true, manageMaterials: true,
-            managePatients: true, manageInvoices: true, bulkStatusChange: true,
-            quickCount: true, exportData: true, manageUsers: true,
-            manageSettings: true, viewDashboard: true, importExcel: true,
-            manageDailyPlan: true, viewReports: true
-          },
-          isActive: true
-        });
-        console.log('✅ Alternative admin created: admin@hospital.com / admin123');
-      } catch (altError) {
-        console.error('❌ Alternative admin creation also failed:', altError.message);
-      }
-    }
-    
-    // DEBUG USER - Plain text password ile
-    try {
-      const [debugUser] = await sequelize.query(
-        'SELECT id FROM users WHERE email = $1',
-        { replacements: ['debug@hospital.com'] }
-      );
-      
-      if (debugUser.length === 0) {
-        await sequelize.query(
-          `INSERT INTO users (email, username, password, name, department, role, permissions, "isActive") 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          {
-            replacements: [
-              'debug@hospital.com',
-              'debug',
-              'debug123', // PLAIN TEXT!
-              'Debug User',
-              'IT',
-              'admin',
-              JSON.stringify({ all: true }),
-              true
-            ]
-          }
-        );
-        console.log('✅ DEBUG user created: debug@hospital.com / debug123 (PLAIN TEXT)');
-      }
-    } catch (debugError) {
-      console.log('⚠️  Debug user error:', debugError.message);
     }
     
     console.log('✅ Database initialization completed.');
@@ -305,93 +273,39 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Login - DEBUG MODU EKLENDİ
+// Login
 app.post('/api/auth/login', async (req, res) => {
-  console.log('🔍 LOGIN DEBUG === START ===');
-  console.log('📧 Email:', req.body.email);
-  console.log('🔑 Password:', req.body.password);
+  console.log('🔍 LOGIN attempt for:', req.body.email);
   
   try {
     const { email, password } = req.body;
     
     if (!email || !password) {
-      console.log('❌ Missing email or password');
       return res.status(400).json({ error: 'Email ve şifre gereklidir' });
     }
     
-    // DEBUG: Direkt SQL query
-    console.log('🔍 Database query for:', email);
-    const [users] = await sequelize.query(
-      'SELECT * FROM users WHERE email = $1 AND "isActive" = true',
-      { replacements: [email] }
-    );
+    const user = await User.findOne({
+      where: { email: email.toLowerCase(), is_active: true }
+    });
     
-    console.log('🔍 Users found:', users.length);
-    
-    if (users.length === 0) {
+    if (!user) {
       console.log('❌ No user found with email:', email);
       return res.status(401).json({ error: 'Geçersiz email veya şifre' });
     }
     
-    const user = users[0];
-    console.log('👤 User found:', user.email);
-    console.log('🗝️  Stored password (first 30):', user.password.substring(0, 30));
-    console.log('🔢 Password length:', user.password.length);
-    
-    // ÇOKLU ŞİFRE KONTROLÜ
-    let passwordValid = false;
-    
-    // 1. Bcrypt kontrol
-    try {
-      console.log('🔄 Trying bcrypt compare...');
-      passwordValid = await bcrypt.compare(password, user.password);
-      console.log('🔍 Bcrypt result:', passwordValid);
-    } catch (bcryptError) {
-      console.log('⚠️  Bcrypt error:', bcryptError.message);
-    }
-    
-    // 2. Plain text kontrol (acil durum)
-    if (!passwordValid) {
-      console.log('🔄 Trying plain text compare...');
-      if (user.password === password) {
-        console.log('✅ PLAIN TEXT PASSWORD MATCH!');
-        passwordValid = true;
-        
-        // Plain text şifreyi hash'le
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await sequelize.query(
-          'UPDATE users SET password = $1 WHERE id = $2',
-          { replacements: [hashedPassword, user.id] }
-        );
-        console.log('🔧 Password hashed and updated in database');
-      }
-    }
-    
-    // 3. Özel durum: "123456" -> "admin123"
-    if (!passwordValid && user.password === '123456' && password === 'admin123') {
-      console.log('✅ Special case: 123456 -> admin123');
-      passwordValid = true;
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      await sequelize.query(
-        'UPDATE users SET password = $1 WHERE id = $2',
-        { replacements: [hashedPassword, user.id] }
-      );
-    }
+    const passwordValid = await bcrypt.compare(password, user.password);
     
     if (!passwordValid) {
-      console.log('❌ All password checks failed');
-      console.log('🔍 LOGIN DEBUG === END WITH FAILURE ===');
+      console.log('❌ Invalid password for:', email);
       return res.status(401).json({ error: 'Geçersiz email veya şifre' });
     }
-    
-    console.log('✅ Password validation successful');
     
     // Token oluştur
     const token = jwt.sign(
       {
         id: user.id,
         email: user.email,
-        name: user.name,
+        name: user.full_name,
         role: user.role,
         permissions: user.permissions || {}
       },
@@ -400,13 +314,38 @@ app.post('/api/auth/login', async (req, res) => {
     );
     
     // Son giriş zamanını güncelle
-    await sequelize.query(
-      'UPDATE users SET "lastLogin" = CURRENT_TIMESTAMP WHERE id = $1',
-      { replacements: [user.id] }
-    );
+    await user.update({
+      last_login: new Date(),
+      last_login_ip: req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress
+    });
     
-    console.log('✅ Token created successfully');
-    console.log('🔍 LOGIN DEBUG === END WITH SUCCESS ===');
+    // Oturum kaydı oluştur
+    await UserSession.create({
+      userId: user.id,
+      userName: user.full_name,
+      userRole: user.role,
+      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      isActive: true,
+      deviceInfo: {
+        browser: extractBrowserInfo(req.headers['user-agent']),
+        os: extractOSInfo(req.headers['user-agent']),
+        device: extractDeviceInfo(req.headers['user-agent'])
+      }
+    });
+    
+    // Log kaydı
+    await SystemLog.create({
+      action: 'LOGIN',
+      module: 'AUTH',
+      recordId: user.id.toString(),
+      details: `Kullanıcı giriş yaptı: ${user.email}`,
+      performedBy: user.full_name,
+      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      userAgent: req.headers['user-agent']
+    });
+    
+    console.log('✅ Login successful for:', email);
     
     res.json({
       success: true,
@@ -414,10 +353,11 @@ app.post('/api/auth/login', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
-        name: user.name,
+        username: user.username,
+        name: user.full_name,
         role: user.role,
         department: user.department,
-        avatarColor: user.avatarColor,
+        avatarColor: user.avatar_color,
         phone: user.phone,
         permissions: user.permissions || {}
       }
@@ -425,56 +365,402 @@ app.post('/api/auth/login', async (req, res) => {
     
   } catch (error) {
     console.error('🔥 LOGIN ERROR:', error);
-    console.log('🔍 LOGIN DEBUG === END WITH ERROR ===');
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
-// Emergency login endpoint (şifre sıfırlama için)
-app.post('/api/auth/emergency-login', async (req, res) => {
-  console.log('🚨 EMERGENCY LOGIN CALLED');
+// User agent parsing helpers
+function extractBrowserInfo(userAgent) {
+  if (!userAgent) return 'Unknown';
+  if (userAgent.includes('Chrome')) return 'Chrome';
+  if (userAgent.includes('Firefox')) return 'Firefox';
+  if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) return 'Safari';
+  if (userAgent.includes('Edge')) return 'Edge';
+  return 'Unknown';
+}
+
+function extractOSInfo(userAgent) {
+  if (!userAgent) return 'Unknown';
+  if (userAgent.includes('Windows')) return 'Windows';
+  if (userAgent.includes('Mac')) return 'macOS';
+  if (userAgent.includes('Linux')) return 'Linux';
+  if (userAgent.includes('Android')) return 'Android';
+  if (userAgent.includes('iOS')) return 'iOS';
+  return 'Unknown';
+}
+
+function extractDeviceInfo(userAgent) {
+  if (!userAgent) return 'Desktop';
+  if (userAgent.includes('Mobile')) return 'Mobile';
+  if (userAgent.includes('Tablet')) return 'Tablet';
+  return 'Desktop';
+}
+
+// ============ KULLANICI YÖNETİMİ API ============
+
+// Tüm kullanıcıları getir
+app.get('/api/users', authenticateToken, async (req, res) => {
+  console.log('🔍 /api/users endpoint called by:', req.user.email);
   
   try {
-    const { email } = req.body;
+    const users = await User.findAll({
+      attributes: [
+        'id', 'email', 'username', 'full_name', 'phone', 'department', 
+        'role', 'is_active', 'avatar_color', 'last_login',
+        'permissions', 'createdAt', 'updatedAt'
+      ],
+      order: [['createdAt', 'DESC']]
+    });
     
-    console.log('🔍 Emergency login for:', email);
+    // Kullanıcıları frontend formatına dönüştür
+    const formattedUsers = users.map(user => ({
+      id: user.id.toString(),
+      username: user.username,
+      email: user.email,
+      name: user.full_name,
+      department: user.department,
+      role: user.role,
+      isActive: user.is_active,
+      lastLogin: user.last_login,
+      phone: user.phone,
+      avatarColor: user.avatar_color,
+      permissions: user.permissions || {
+        createSession: false,
+        approveCounts: false,
+        manageMaterials: false,
+        managePatients: false,
+        manageInvoices: false,
+        bulkStatusChange: false,
+        quickCount: false,
+        exportData: false,
+        manageUsers: false,
+        manageSettings: false,
+        viewDashboard: true,
+        importExcel: false,
+        manageDailyPlan: false,
+        viewReports: false
+      },
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    }));
     
-    const [users] = await sequelize.query(
-      'SELECT * FROM users WHERE email = $1',
-      { replacements: [email] }
-    );
+    console.log(`✅ ${formattedUsers.length} kullanıcı döndürüldü`);
+    res.json(formattedUsers);
     
-    if (users.length === 0) {
-      console.log('❌ User not found for emergency login');
+  } catch (error) {
+    console.error('❌ Kullanıcıları getirme hatası:', error);
+    res.status(500).json({ error: 'Kullanıcılar yüklenemedi' });
+  }
+});
+
+// Yeni kullanıcı oluştur
+app.post('/api/users', authenticateToken, async (req, res) => {
+  console.log('🔍 /api/users POST called by:', req.user.email);
+  
+  try {
+    const {
+      name, email, password, role = 'staff',
+      department, phone, permissions
+    } = req.body;
+    
+    // Gerekli alanları kontrol et
+    if (!email || !password || !name) {
+      return res.status(400).json({ error: 'Email, şifre ve ad soyad gereklidir' });
+    }
+    
+    // Email kontrolü
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Bu email zaten kayıtlı' });
+    }
+    
+    // Varsayılan izinleri ayarla
+    const defaultPermissions = {
+      createSession: role === 'admin' || role === 'manager',
+      approveCounts: role === 'admin' || role === 'manager',
+      manageMaterials: role === 'admin',
+      managePatients: role !== 'viewer',
+      manageInvoices: role === 'admin',
+      viewReports: true,
+      manageUsers: role === 'admin',
+      manageSettings: role === 'admin',
+      bulkStatusChange: role === 'admin',
+      quickCount: role === 'admin' || role === 'manager',
+      exportData: role === 'admin' || role === 'manager',
+      viewDashboard: true,
+      importExcel: role === 'admin' || role === 'manager',
+      manageDailyPlan: role === 'admin' || role === 'manager'
+    };
+    
+    // Şifreyi hash'le
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const newUser = await User.create({
+      email: email.toLowerCase(),
+      username: email.split('@')[0],
+      password: hashedPassword,
+      full_name: name,
+      department: department || 'Personel',
+      role: role,
+      phone: phone || '',
+      permissions: permissions || defaultPermissions,
+      avatar_color: generateAvatarColor(),
+      is_active: true
+    });
+    
+    // Log kaydı
+    await SystemLog.create({
+      action: 'CREATE',
+      module: 'USER',
+      recordId: newUser.id.toString(),
+      details: `Yeni kullanıcı oluşturuldu: ${name} (${email})`,
+      performedBy: req.user.name
+    });
+    
+    console.log(`✅ Yeni kullanıcı oluşturuldu: ${email}`);
+    
+    res.json({
+      id: newUser.id.toString(),
+      username: newUser.username,
+      email: newUser.email,
+      name: newUser.full_name,
+      department: newUser.department,
+      role: newUser.role,
+      isActive: newUser.is_active,
+      phone: newUser.phone,
+      avatarColor: newUser.avatar_color,
+      permissions: newUser.permissions,
+      createdAt: newUser.createdAt,
+      updatedAt: newUser.updatedAt
+    });
+    
+  } catch (error) {
+    console.error('❌ Kullanıcı oluşturma hatası:', error);
+    
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({ error: 'Bu email zaten kayıtlı' });
+    }
+    
+    res.status(500).json({ error: 'Kullanıcı kaydedilemedi' });
+  }
+});
+
+// Kullanıcı güncelle
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+  console.log(`🔍 /api/users/${req.params.id} PUT called by:`, req.user.email);
+  
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    const user = await User.findByPk(id);
+    if (!user) {
       return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
     }
     
-    const user = users[0];
-    console.log('👤 Emergency user found:', user.email);
+    // Güncellenecek alanları hazırla
+    const updateData = {};
     
-    // Yeni token oluştur
-    const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        permissions: user.permissions || {}
-      },
-      JWT_SECRET,
-      { expiresIn: '1h' }
-    );
+    if (updates.name !== undefined) updateData.full_name = updates.name;
+    if (updates.email !== undefined) updateData.email = updates.email.toLowerCase();
+    if (updates.department !== undefined) updateData.department = updates.department;
+    if (updates.role !== undefined) updateData.role = updates.role;
+    if (updates.phone !== undefined) updateData.phone = updates.phone;
+    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
+    if (updates.permissions !== undefined) updateData.permissions = updates.permissions;
+    if (updates.avatarColor !== undefined) updateData.avatar_color = updates.avatarColor;
     
-    console.log('✅ Emergency token created');
+    // Şifre güncelleniyorsa hash'le
+    if (updates.password) {
+      updateData.password = await bcrypt.hash(updates.password, 10);
+    }
+    
+    await user.update(updateData);
+    
+    // Log kaydı
+    await SystemLog.create({
+      action: 'UPDATE',
+      module: 'USER',
+      recordId: id,
+      details: `Kullanıcı güncellendi: ${user.full_name}`,
+      performedBy: req.user.name
+    });
     
     res.json({
+      id: user.id.toString(),
+      username: user.username,
+      email: user.email,
+      name: user.full_name,
+      department: user.department,
+      role: user.role,
+      isActive: user.is_active,
+      phone: user.phone,
+      avatarColor: user.avatar_color,
+      permissions: user.permissions,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    });
+    
+  } catch (error) {
+    console.error('❌ Kullanıcı güncelleme hatası:', error);
+    
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({ error: 'Bu email zaten başka bir kullanıcıda kullanılıyor' });
+    }
+    
+    res.status(500).json({ error: 'Kullanıcı güncellenemedi' });
+  }
+});
+
+// Kullanıcı sil
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
+  console.log(`🔍 /api/users/${req.params.id} DELETE called by:`, req.user.email);
+  
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findByPk(id);
+    if (!user) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    }
+    
+    // Log kaydı (silmeden önce)
+    await SystemLog.create({
+      action: 'DELETE',
+      module: 'USER',
+      recordId: id,
+      details: `Kullanıcı silindi: ${user.full_name} (${user.email})`,
+      performedBy: req.user.name
+    });
+    
+    await user.destroy();
+    
+    res.json({ success: true, message: 'Kullanıcı başarıyla silindi' });
+    
+  } catch (error) {
+    console.error('❌ Kullanıcı silme hatası:', error);
+    res.status(500).json({ error: 'Kullanıcı silinemedi' });
+  }
+});
+
+// Oturumları getir
+app.get('/api/sessions', authenticateToken, async (req, res) => {
+  try {
+    const sessions = await UserSession.findAll({
+      where: { isActive: true },
+      order: [['loginTime', 'DESC']],
+      limit: 50
+    });
+    
+    res.json(sessions.map(session => ({
+      id: session.id.toString(),
+      userId: session.userId.toString(),
+      userName: session.userName,
+      userRole: session.userRole,
+      loginTime: session.loginTime,
+      lastActivity: session.lastActivity,
+      ipAddress: session.ipAddress,
+      userAgent: session.userAgent,
+      isActive: session.isActive,
+      deviceInfo: session.deviceInfo
+    })));
+  } catch (error) {
+    console.error('❌ Oturumları getirme hatası:', error);
+    res.status(500).json({ error: 'Oturumlar yüklenemedi' });
+  }
+});
+
+// Oturumu sonlandır
+app.delete('/api/sessions/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const session = await UserSession.findByPk(id);
+    if (!session) {
+      return res.status(404).json({ error: 'Oturum bulunamadı' });
+    }
+    
+    await session.update({ isActive: false });
+    
+    // Log kaydı
+    await SystemLog.create({
+      action: 'TERMINATE_SESSION',
+      module: 'USER_SESSION',
+      recordId: id,
+      details: `Oturum sonlandırıldı: ${session.userName} - Sebep: ${reason || 'Yönetici tarafından'}`,
+      performedBy: req.user.name
+    });
+    
+    res.json({ success: true, message: 'Oturum sonlandırıldı' });
+  } catch (error) {
+    console.error('❌ Oturum sonlandırma hatası:', error);
+    res.status(500).json({ error: 'Oturum sonlandırılamadı' });
+  }
+});
+
+// Sistem loglarını getir
+app.get('/api/logs', authenticateToken, async (req, res) => {
+  try {
+    const logs = await SystemLog.findAll({
+      where: {
+        [Op.or]: [
+          { module: 'AUTH' },
+          { module: 'USER' },
+          { module: 'USER_SESSION' }
+        ]
+      },
+      order: [['performedAt', 'DESC']],
+      limit: 100
+    });
+    
+    res.json(logs.map(log => ({
+      id: log.id.toString(),
+      action: log.action,
+      module: log.module,
+      recordId: log.recordId,
+      details: log.details,
+      performedBy: log.performedBy,
+      performedAt: log.performedAt,
+      ipAddress: log.ipAddress,
+      userAgent: log.userAgent
+    })));
+  } catch (error) {
+    console.error('❌ Logları getirme hatası:', error);
+    res.status(500).json({ error: 'Loglar yüklenemedi' });
+  }
+});
+
+// ============ DİĞER API ROUTES ============
+
+// Get user info
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id, {
+      attributes: ['id', 'email', 'username', 'full_name', 'department', 'role', 'avatar_color', 'phone', 'permissions']
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    }
+
+    res.json({
       success: true,
-      token,
-      message: 'Emergency login successful'
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        name: user.full_name,
+        role: user.role,
+        department: user.department,
+        avatarColor: user.avatar_color,
+        phone: user.phone,
+        permissions: user.permissions || {}
+      }
     });
   } catch (error) {
-    console.error('Emergency login error:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Get user info error:', error);
+    res.status(500).json({ error: 'Database error' });
   }
 });
 
@@ -656,17 +942,50 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
 
     const totalPatients = await Patient.count({ where: { isActive: true } });
 
+    // Aktif oturum sayısı
+    const activeSessions = await UserSession.count({ where: { isActive: true } });
+
+    // Status özeti
+    const statusSummaryResult = await Material.findAll({
+      where: { isActive: true },
+      attributes: [
+        'status',
+        [Sequelize.fn('COUNT', Sequelize.col('id')), 'count']
+      ],
+      group: ['status'],
+      raw: true
+    });
+
+    const statusSummary = {
+      normal: 0,
+      konsinye: 0,
+      iade: 0,
+      faturalı: 0
+    };
+
+    statusSummaryResult.forEach(item => {
+      if (item.status === 'normal') statusSummary.normal = parseInt(item.count);
+      else if (item.status === 'konsinye') statusSummary.konsinye = parseInt(item.count);
+      else if (item.status === 'iade') statusSummary.iade = parseInt(item.count);
+      else if (item.status === 'faturalı') statusSummary.faturalı = parseInt(item.count);
+    });
+
     res.json({
       success: true,
       data: {
         totalMaterials,
-        totalStockValue,
+        totalStockValue: parseFloat(totalStockValue),
         criticalStockCount,
         totalPatients,
         totalInvoices: 0,
         totalInvoiceAmount: 0,
         todayUsageCost: 0,
-        todayUsagesCount: 0
+        todayUsagesCount: 0,
+        activeSessions,
+        statusSummary,
+        totalSessions: await UserSession.count(),
+        weeklySales: 0,
+        monthlySales: 0
       }
     });
   } catch (error) {
@@ -675,30 +994,18 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Get user info
-app.get('/api/auth/me', authenticateToken, async (req, res) => {
-  try {
-    const user = await User.findByPk(req.user.id, {
-      attributes: ['id', 'email', 'username', 'name', 'department', 'role', 'avatarColor', 'phone']
-    });
+// ============ YARDIMCI FONKSİYONLAR ============
 
-    if (!user) {
-      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-    }
+// Helper function for avatar color
+function generateAvatarColor() {
+  const colors = [
+    '#4F46E5', '#7C3AED', '#EC4899', '#EF4444', 
+    '#F59E0B', '#10B981', '#06B6D4', '#3B82F6'
+  ];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
 
-    res.json({
-      success: true,
-      user: {
-        ...user.toJSON(),
-        permissions: req.user.permissions || {}
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Database error' });
-  }
-});
-
-// Static files
+// Static files - Vite build klasörünü göster
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // React Router fallback
@@ -710,7 +1017,6 @@ app.get('*', (req, res) => {
 const startServer = async () => {
   console.log('🚀 Starting server...');
   console.log(`📦 NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`🗄️  Database URL: ${process.env.DATABASE_URL ? 'Configured' : 'Not configured'}`);
   
   await initDatabase();
   
@@ -721,17 +1027,23 @@ const startServer = async () => {
     console.log(`📍 Port: ${PORT}`);
     console.log(`📍 URL: https://stock-dashboard-p5ip.onrender.com`);
     console.log(`📍 Database: PostgreSQL (Neon.tech)`);
-    console.log(`📍 Environment: ${process.env.NODE_ENV}`);
     console.log('=========================================');
     console.log('👤 TEST LOGINS:');
-    console.log(`   1. Email: hurcanalkan@osmangazigoz.com`);
-    console.log(`      Password: admin123 (or 123456 if plain text)`);
-    console.log(`   2. Email: debug@hospital.com`);
-    console.log(`      Password: debug123 (PLAIN TEXT)`);
-    console.log(`   3. Email: admin@hospital.com`);
-    console.log(`      Password: admin123`);
+    console.log(`   Email: admin@osmangazigoz.com`);
+    console.log(`   Password: admin123`);
     console.log('=========================================');
-    console.log('🔍 DEBUG MODE: ACTIVE - Check Render Logs');
+    console.log('📊 API ENDPOINTS:');
+    console.log(`   POST   /api/auth/login`);
+    console.log(`   GET    /api/users`);
+    console.log(`   POST   /api/users`);
+    console.log(`   PUT    /api/users/:id`);
+    console.log(`   DELETE /api/users/:id`);
+    console.log(`   GET    /api/sessions`);
+    console.log(`   DELETE /api/sessions/:id`);
+    console.log(`   GET    /api/logs`);
+    console.log(`   GET    /api/materials`);
+    console.log(`   GET    /api/patients`);
+    console.log(`   GET    /api/dashboard/stats`);
     console.log('=========================================');
   });
 };

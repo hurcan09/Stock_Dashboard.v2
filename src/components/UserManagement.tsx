@@ -1,105 +1,348 @@
-// src/components/UserManagement.tsx - NEON SQL BAĞLANTILI
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Users,
   UserPlus,
-  UserMinus,
-  UserCheck,
-  UserX,
   Search,
   Filter,
   Edit,
   Trash2,
   Power,
   Shield,
-  Eye,
-  EyeOff,
-  ChevronDown,
-  ChevronUp,
-  MoreVertical,
   CheckCircle,
   XCircle,
-  Lock,
-  Mail,
-  Phone,
-  Calendar,
-  Activity,
-  Download,
-  Upload,
-  RefreshCw,
-  Key,
-  Ban,
-  Check,
   X,
-  Info
+  Info,
+  Database,
+  RefreshCw,
+  Activity,
+  UserCheck
 } from 'lucide-react';
-import { User, UserSession, SystemLog } from '../types';
+import { User, UserSession } from '../types';
 
-// API Client
-const API_BASE = 'https://stock-dashboard-p5ip.onrender.com/api';
+// PostgreSQL API Client
+const API_BASE = process.env.NODE_ENV === 'production' 
+  ? 'https://stock-dashboard-p5ip.onrender.com/api'
+  : 'http://localhost:10000/api';
 
+// Token'ı localStorage'dan al
+const getToken = () => {
+  return localStorage.getItem('token') || '';
+};
+
+// PostgreSQL API Client
 const apiClient = {
   async getUsers(): Promise<User[]> {
-    const response = await fetch(`${API_BASE}/users`);
-    if (!response.ok) throw new Error('Kullanıcılar yüklenemedi');
-    return response.json();
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_BASE}/users`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu');
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (Array.isArray(result)) {
+        return result.map((item: any) => ({
+          id: item.id.toString(),
+          username: item.username || item.email.split('@')[0],
+          email: item.email,
+          password: item.password || '',
+          name: item.name,
+          phone: item.phone || '',
+          department: item.department || '',
+          role: item.role || 'user',
+          permissions: item.permissions || {
+            viewDashboard: true,
+            viewReports: true
+          },
+          avatarColor: item.avatarColor || '#4F46E5',
+          isActive: item.isActive !== false,
+          lastLogin: item.lastLogin,
+          lastLoginIp: item.lastLoginIp || '',
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ Kullanıcılar yüklenemedi:', error);
+      throw error;
+    }
   },
 
-  async saveUser(userData: any): Promise<User> {
-    const response = await fetch(`${API_BASE}/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(userData)
-    });
-    if (!response.ok) throw new Error('Kullanıcı kaydedilemedi');
-    return response.json();
+  async createUser(userData: any): Promise<User> {
+    const token = getToken();
+    try {
+      console.log('📤 PostgreSQL\'e kullanıcı ekleniyor:', userData.email);
+      
+      const postgresUser = {
+        name: userData.name.trim(),
+        email: userData.email.trim().toLowerCase(),
+        password: userData.password,
+        username: userData.email.split('@')[0],
+        phone: userData.phone || '',
+        department: userData.department || '',
+        role: userData.role || 'staff',
+        permissions: userData.permissions || {
+          viewDashboard: true,
+          viewReports: true
+        },
+        isActive: true
+      };
+
+      const response = await fetch(`${API_BASE}/users`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(postgresUser)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Kullanıcı oluşturma hatası:', response.status, errorText);
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          throw new Error(errorJson.error || 'Kullanıcı oluşturulamadı');
+        } catch {
+          throw new Error(`Kullanıcı oluşturulamadı: ${response.status}`);
+        }
+      }
+      
+      const result = await response.json();
+      
+      if (!result.id) {
+        throw new Error(result.error || 'Kullanıcı oluşturulamadı');
+      }
+      
+      console.log('✅ PostgreSQL kullanıcı oluşturuldu:', result);
+      
+      return {
+        id: result.id.toString(),
+        username: result.username || userData.email.split('@')[0],
+        email: result.email || userData.email,
+        password: '',
+        name: result.name || userData.name,
+        phone: result.phone || userData.phone || '',
+        department: result.department || userData.department || '',
+        role: result.role || userData.role || 'staff',
+        permissions: result.permissions || userData.permissions,
+        avatarColor: result.avatarColor || '#4F46E5',
+        isActive: true,
+        lastLogin: null,
+        lastLoginIp: '',
+        createdAt: result.createdAt || new Date().toISOString(),
+        updatedAt: result.updatedAt || new Date().toISOString()
+      };
+    } catch (error) {
+      console.error('❌ PostgreSQL kullanıcı oluşturma hatası:', error);
+      throw error;
+    }
   },
 
   async updateUser(id: string, updates: any): Promise<User> {
-    const response = await fetch(`${API_BASE}/users/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (!response.ok) throw new Error('Kullanıcı güncellenemedi');
-    return response.json();
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_BASE}/users/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Kullanıcı güncellenemedi');
+      }
+      
+      const result = await response.json();
+      
+      return {
+        id: result.id.toString(),
+        username: result.username || '',
+        email: result.email || '',
+        password: '',
+        name: result.name || updates.name,
+        phone: result.phone || updates.phone || '',
+        department: result.department || updates.department || '',
+        role: result.role || updates.role,
+        permissions: result.permissions || updates.permissions,
+        avatarColor: result.avatarColor || '#4F46E5',
+        isActive: result.isActive !== false,
+        lastLogin: result.lastLogin || null,
+        lastLoginIp: result.lastLoginIp || '',
+        createdAt: result.createdAt || new Date().toISOString(),
+        updatedAt: result.updatedAt || new Date().toISOString()
+      };
+    } catch (error) {
+      console.error('❌ PostgreSQL kullanıcı güncelleme hatası:', error);
+      throw error;
+    }
   },
 
   async deleteUser(id: string): Promise<boolean> {
-    const response = await fetch(`${API_BASE}/users/${id}`, {
-      method: 'DELETE'
-    });
-    return response.ok;
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_BASE}/users/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Kullanıcı silinemedi');
+      }
+      
+      const result = await response.json();
+      return result.success === true || result.message !== undefined;
+    } catch (error) {
+      console.error('❌ PostgreSQL kullanıcı silme hatası:', error);
+      throw error;
+    }
   },
 
-  async getUserSessions(): Promise<UserSession[]> {
-    const response = await fetch(`${API_BASE}/sessions`);
-    if (!response.ok) return [];
-    return response.json();
+  async changePassword(userId: string, newPassword: string): Promise<boolean> {
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_BASE}/users/${userId}/password`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ password: newPassword })
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu');
+      }
+      
+      return response.ok;
+    } catch (error) {
+      console.error('❌ Şifre değiştirme hatası:', error);
+      throw error;
+    }
   },
 
-  async getLogs(): Promise<SystemLog[]> {
-    const response = await fetch(`${API_BASE}/logs`);
-    if (!response.ok) return [];
-    return response.json();
+  async getActiveSessions(): Promise<UserSession[]> {
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_BASE}/sessions`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        return [];
+      }
+      
+      const result = await response.json();
+      return result.success ? result.data : [];
+    } catch (error) {
+      console.error('❌ Oturumlar yüklenemedi:', error);
+      return [];
+    }
   },
 
-  async terminateSession(sessionId: string, reason?: string): Promise<boolean> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason })
-    });
-    return response.ok;
+  async terminateSession(sessionId: number): Promise<boolean> {
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      return response.ok;
+    } catch (error) {
+      console.error('❌ Oturum sonlandırma hatası:', error);
+      return false;
+    }
   }
 };
 
-// Info Icon Component
-const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
+// Database Status Component
+const DatabaseStatus: React.FC<{ 
+  isConnected: boolean; 
+  message: string;
+  onRefresh?: () => void;
+}> = ({ isConnected, message, onRefresh }) => {
+  return (
+    <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+      isConnected 
+        ? 'bg-green-100 text-green-800 border border-green-200' 
+        : 'bg-red-100 text-red-800 border border-red-200'
+    }`}>
+      {isConnected ? (
+        <>
+          <Database className="h-3.5 w-3.5" />
+          <span>PostgreSQL: Aktif</span>
+        </>
+      ) : (
+        <>
+          <Database className="h-3.5 w-3.5" />
+          <span>PostgreSQL: Bağlantı Yok</span>
+        </>
+      )}
+      {onRefresh && (
+        <button
+          onClick={onRefresh}
+          className="ml-1 p-1 hover:opacity-80 transition-opacity"
+          title="Bağlantıyı yenile"
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+};
 
 // Benzersiz kullanıcıları son giriş tarihine göre filtreleme fonksiyonu
 const getUniqueUsersByLastLogin = (users: User[]): User[] => {
@@ -154,8 +397,13 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [activeSessions, setActiveSessions] = useState<UserSession[]>([]);
-  const [activityLogs, setActivityLogs] = useState<SystemLog[]>([]);
+  const [dbStatus, setDbStatus] = useState<{
+    connected: boolean;
+    message: string;
+  }>({
+    connected: false,
+    message: 'PostgreSQL bağlantısı kontrol ediliyor...'
+  });
   
   // Kullanıcı düzenleme modal state
   const [showEditModal, setShowEditModal] = useState(false);
@@ -169,18 +417,12 @@ export default function UserManagement() {
     isActive: true
   });
 
-  // Yetki yönetimi modal state
-  const [showPermissionModal, setShowPermissionModal] = useState(false);
-  const [permissionUser, setPermissionUser] = useState<User | null>(null);
-  const [permissionForm, setPermissionForm] = useState({
-    manageMaterials: false,
-    managePatients: false,
-    manageInvoices: false,
-    manageUsers: false,
-    viewDashboard: false,
-    importExcel: false,
-    manageDailyPlan: false,
-    viewReports: false
+  // Şifre değiştirme modal state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordUser, setPasswordUser] = useState<User | null>(null);
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: '',
+    confirmPassword: ''
   });
 
   // Yeni kullanıcı modal state
@@ -192,39 +434,126 @@ export default function UserManagement() {
     confirmPassword: '',
     role: 'staff' as User['role'],
     department: '',
-    phone: ''
+    phone: '',
+    showPassword: false
   });
+
+  // Yetki yönetimi modal state
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [permissionUser, setPermissionUser] = useState<User | null>(null);
+  const [permissionForm, setPermissionForm] = useState({
+    manageMaterials: false,
+    managePatients: false,
+    manageInvoices: false,
+    manageUsers: false,
+    viewDashboard: true,
+    importExcel: false,
+    manageDailyPlan: false,
+    viewReports: true
+  });
+
+  // Aktif oturumlar state
+  const [activeSessions, setActiveSessions] = useState<UserSession[]>([]);
+  
+  // Sistem logları state
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
 
   // Seçili kullanıcılar
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+
+  // PostgreSQL bağlantısını kontrol et
+  const checkPostgreSQLConnection = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/health`);
+      const data = await response.json();
+      
+      const isConnected = data.status === 'OK' && data.database === 'Connected';
+      
+      setDbStatus({
+        connected: isConnected,
+        message: isConnected 
+          ? '✅ PostgreSQL bağlantısı başarılı' 
+          : '❌ PostgreSQL bağlantısı yok'
+      });
+
+      return isConnected;
+    } catch (error) {
+      console.error('❌ PostgreSQL bağlantı kontrolü başarısız:', error);
+      setDbStatus({
+        connected: false,
+        message: '❌ PostgreSQL sunucusuna bağlanılamıyor'
+      });
+      return false;
+    }
+  }, []);
 
   // Verileri yükle
   const loadData = useCallback(async () => {
     setLoading(true);
     setError('');
+    
     try {
-      // Kullanıcıları Neon SQL'den al
+      // Önce PostgreSQL bağlantısını kontrol et
+      const isConnected = await checkPostgreSQLConnection();
+      
+      if (!isConnected) {
+        setError('PostgreSQL bağlantısı yok! Kullanıcı yönetimi için PostgreSQL bağlantısı gerekiyor.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('📡 PostgreSQL kullanıcı verileri yükleniyor...');
       const allUsers = await apiClient.getUsers();
+      console.log('✅ PostgreSQL kullanıcıları yüklendi:', allUsers.length);
+      
       setUsers(allUsers);
       setFilteredUsers(allUsers);
       setUniqueFilteredUsers(getUniqueUsersByLastLogin(allUsers));
       
-      // Oturumları ve logları al (şimdilik boş)
-      const sessions = await apiClient.getUserSessions();
-      setActiveSessions(sessions.filter(s => s.isActive));
+      // Aktif oturumları yükle
+      const sessions = await apiClient.getActiveSessions();
+      setActiveSessions(sessions);
       
-      const logs = await apiClient.getLogs();
-      const filteredLogs = logs.filter(log => 
-        log.module === 'AUTH' || log.module === 'USER'
-      ).slice(0, 10);
-      setActivityLogs(filteredLogs);
+      // Demo log verileri
+      setActivityLogs([
+        {
+          performedBy: 'Sistem Yöneticisi',
+          details: 'Yeni kullanıcı oluşturuldu: Ahmet Yılmaz',
+          action: 'CREATE',
+          performedAt: new Date(Date.now() - 3600000)
+        },
+        {
+          performedBy: 'Doktor Mehmet',
+          details: 'Hasta kaydı güncellendi: Fatma Çelik',
+          action: 'UPDATE',
+          performedAt: new Date(Date.now() - 7200000)
+        },
+        {
+          performedBy: 'Personel Ayşe',
+          details: 'Malzeme stoğu güncellendi: Katarakt Lens',
+          action: 'UPDATE',
+          performedAt: new Date(Date.now() - 10800000)
+        }
+      ]);
+      
     } catch (err: any) {
-      setError('Veriler yüklenirken bir hata oluştu: ' + err.message);
-      console.error('Veri yükleme hatası:', err);
+      console.error('❌ PostgreSQL veri yükleme hatası:', err);
+      setError('PostgreSQL veritabanından veriler yüklenemedi: ' + (err.message || 'Bilinmeyen hata'));
+      
+      // Token kontrolü
+      const token = localStorage.getItem('token');
+      if (err.message.includes('401') || err.message.includes('Oturum süresi doldu')) {
+        setError('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [checkPostgreSQLConnection]);
 
   useEffect(() => {
     loadData();
@@ -258,10 +587,16 @@ export default function UserManagement() {
     setUniqueFilteredUsers(getUniqueUsersByLastLogin(result));
   }, [users, searchTerm, filterRole, filterStatus]);
 
-  // Kullanıcı ekleme
-  const handleAddUser = async () => {
-    if (newUserForm.password !== newUserForm.confirmPassword) {
-      setError('Şifreler eşleşmiyor');
+  // Yeni kullanıcı oluşturma - PostgreSQL'e kaydet
+  const handleCreateUser = async () => {
+    // Validasyon
+    if (!newUserForm.name.trim()) {
+      setError('Lütfen ad soyad giriniz');
+      return;
+    }
+    
+    if (!newUserForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newUserForm.email)) {
+      setError('Lütfen geçerli bir email adresi giriniz');
       return;
     }
     
@@ -270,19 +605,23 @@ export default function UserManagement() {
       return;
     }
     
+    if (newUserForm.password !== newUserForm.confirmPassword) {
+      setError('Şifreler eşleşmiyor');
+      return;
+    }
+    
     setLoading(true);
     setError('');
     
     try {
+      // PostgreSQL için kullanıcı verisi oluştur
       const userData = {
-        name: newUserForm.name,
-        email: newUserForm.email,
-        role: newUserForm.role,
-        department: newUserForm.department,
-        phone: newUserForm.phone,
-        isActive: true,
-        username: newUserForm.email.split('@')[0],
+        name: newUserForm.name.trim(),
+        email: newUserForm.email.trim().toLowerCase(),
         password: newUserForm.password,
+        role: newUserForm.role,
+        department: newUserForm.department.trim() || '',
+        phone: newUserForm.phone.trim() || '',
         permissions: {
           createSession: newUserForm.role === 'admin' || newUserForm.role === 'manager',
           approveCounts: newUserForm.role === 'admin' || newUserForm.role === 'manager',
@@ -301,9 +640,17 @@ export default function UserManagement() {
         }
       };
 
-      const newUser = await apiClient.saveUser(userData);
+      console.log('📤 PostgreSQL\'e yeni kullanıcı gönderiliyor:', userData.email);
       
-      setSuccess(`${newUser.name} başarıyla eklendi`);
+      // PostgreSQL'e kaydet
+      const newUser = await apiClient.createUser(userData);
+      
+      console.log('✅ PostgreSQL kullanıcı oluşturuldu:', newUser.email);
+      
+      // Başarı mesajı
+      setSuccess(`${newUser.name} PostgreSQL veritabanına başarıyla eklendi!`);
+      
+      // Formu temizle
       setNewUserForm({
         name: '',
         email: '',
@@ -311,14 +658,36 @@ export default function UserManagement() {
         confirmPassword: '',
         role: 'staff',
         department: '',
-        phone: ''
+        phone: '',
+        showPassword: false
       });
+      
+      // Modal'ı kapat
       setShowNewUserModal(false);
+      
+      // Verileri yenile
       await loadData();
       
-      setTimeout(() => setSuccess(''), 3000);
+      // 5 saniye sonra başarı mesajını temizle
+      setTimeout(() => setSuccess(''), 5000);
+      
     } catch (err: any) {
-      setError(err.message);
+      console.error('❌ PostgreSQL kullanıcı oluşturma hatası:', err);
+      
+      let errorMessage = 'Kullanıcı oluşturulamadı!';
+      
+      if (err.message.includes('Bu email adresi zaten kayıtlı')) {
+        errorMessage = '❌ Bu email adresi zaten başka bir kullanıcıda kullanılıyor!';
+      } else if (err.message.includes('Oturum süresi doldu')) {
+        errorMessage = '❌ Oturum süresi doldu. Lütfen tekrar giriş yapın.';
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
+      } else {
+        errorMessage = `❌ ${err.message}`;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -347,13 +716,11 @@ export default function UserManagement() {
     try {
       const updatedUser = await apiClient.updateUser(editingUser.id, editForm);
       
-      if (updatedUser) {
-        setSuccess(`${updatedUser.name} başarıyla güncellendi`);
-        setShowEditModal(false);
-        await loadData();
-        
-        setTimeout(() => setSuccess(''), 3000);
-      }
+      setSuccess(`${updatedUser.name} PostgreSQL'de başarıyla güncellendi`);
+      setShowEditModal(false);
+      await loadData();
+      
+      setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -361,44 +728,46 @@ export default function UserManagement() {
     }
   };
 
-  // Yetki yönetimi
-  const handleEditPermissions = (user: User) => {
-    setPermissionUser(user);
-    setPermissionForm({
-      manageMaterials: user.permissions.manageMaterials,
-      managePatients: user.permissions.managePatients,
-      manageInvoices: user.permissions.manageInvoices,
-      manageUsers: user.permissions.manageUsers,
-      viewDashboard: user.permissions.viewDashboard,
-      importExcel: user.permissions.importExcel,
-      manageDailyPlan: user.permissions.manageDailyPlan,
-      viewReports: user.permissions.viewReports
+  // Şifre değiştirme
+  const handleChangePassword = (user: User) => {
+    setPasswordUser(user);
+    setPasswordForm({
+      newPassword: '',
+      confirmPassword: ''
     });
-    setShowPermissionModal(true);
+    setShowPasswordModal(true);
   };
 
-  const handleUpdatePermissions = async () => {
-    if (!permissionUser) return;
+  const handleUpdatePassword = async () => {
+    if (!passwordUser) return;
+    
+    if (passwordForm.newPassword.length < 6) {
+      setError('Şifre en az 6 karakter olmalıdır');
+      return;
+    }
+    
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setError('Şifreler eşleşmiyor');
+      return;
+    }
     
     setLoading(true);
     setError('');
     
     try {
-      const updates = {
-        permissions: {
-          ...permissionUser.permissions,
-          ...permissionForm
-        }
-      };
+      const success = await apiClient.changePassword(passwordUser.id, passwordForm.newPassword);
       
-      const updatedUser = await apiClient.updateUser(permissionUser.id, updates);
-      
-      if (updatedUser) {
-        setSuccess(`${permissionUser.name} yetkileri güncellendi`);
-        setShowPermissionModal(false);
-        await loadData();
+      if (success) {
+        setSuccess(`${passwordUser.name} şifresi PostgreSQL'de değiştirildi`);
+        setShowPasswordModal(false);
+        setPasswordForm({
+          newPassword: '',
+          confirmPassword: ''
+        });
         
         setTimeout(() => setSuccess(''), 3000);
+      } else {
+        throw new Error('Şifre değiştirilemedi');
       }
     } catch (err: any) {
       setError(err.message);
@@ -412,10 +781,10 @@ export default function UserManagement() {
     const user = users.find(u => u.id === userId);
     if (!user) return;
     
-    if (window.confirm(`${user.name} kullanıcısının durumunu değiştirmek istiyor musunuz?`)) {
+    if (window.confirm(`${user.name} kullanıcısının durumunu PostgreSQL'de ${user.isActive ? 'pasif' : 'aktif'} yapmak istiyor musunuz?`)) {
       try {
         await apiClient.updateUser(userId, { isActive: !user.isActive });
-        setSuccess(`${user.name} durumu ${!user.isActive ? 'aktif' : 'pasif'} yapıldı`);
+        setSuccess(`${user.name} PostgreSQL durumu ${!user.isActive ? 'aktif' : 'pasif'} yapıldı`);
         await loadData();
         
         setTimeout(() => setSuccess(''), 3000);
@@ -430,11 +799,11 @@ export default function UserManagement() {
     const user = users.find(u => u.id === userId);
     if (!user) return;
     
-    if (window.confirm(`${user.name} kullanıcısını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
+    if (window.confirm(`${user.name} kullanıcısını PostgreSQL veritabanından silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
       try {
         const success = await apiClient.deleteUser(userId);
         if (success) {
-          setSuccess(`${user.name} başarıyla silindi`);
+          setSuccess(`${user.name} PostgreSQL'den başarıyla silindi`);
           await loadData();
           
           setTimeout(() => setSuccess(''), 3000);
@@ -445,15 +814,54 @@ export default function UserManagement() {
     }
   };
 
+  // Yetki düzenleme
+  const handleEditPermissions = (user: User) => {
+    setPermissionUser(user);
+    setPermissionForm({
+      manageMaterials: user.permissions?.manageMaterials || false,
+      managePatients: user.permissions?.managePatients || false,
+      manageInvoices: user.permissions?.manageInvoices || false,
+      manageUsers: user.permissions?.manageUsers || false,
+      viewDashboard: user.permissions?.viewDashboard !== false,
+      importExcel: user.permissions?.importExcel || false,
+      manageDailyPlan: user.permissions?.manageDailyPlan || false,
+      viewReports: user.permissions?.viewReports !== false
+    });
+    setShowPermissionModal(true);
+  };
+
+  const handleUpdatePermissions = async () => {
+    if (!permissionUser) return;
+    
+    setLoading(true);
+    setError('');
+    
+    try {
+      await apiClient.updateUser(permissionUser.id, { permissions: permissionForm });
+      
+      setSuccess(`${permissionUser.name} yetkileri güncellendi`);
+      setShowPermissionModal(false);
+      await loadData();
+      
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Oturum yönetimi
-  const handleTerminateSession = async (sessionId: string, userName: string) => {
-    if (window.confirm(`${userName} oturumunu sonlandırmak istiyor musunuz?`)) {
+  const handleTerminateSession = async (sessionId: number, userName: string) => {
+    if (window.confirm(`${userName} kullanıcısının oturumunu sonlandırmak istiyor musunuz?`)) {
       try {
-        await apiClient.terminateSession(sessionId, 'Yönetici tarafından sonlandırıldı');
-        setSuccess('Oturum sonlandırıldı');
-        await loadData();
-        
-        setTimeout(() => setSuccess(''), 3000);
+        const success = await apiClient.terminateSession(sessionId);
+        if (success) {
+          setSuccess('Oturum sonlandırıldı');
+          await loadData();
+          
+          setTimeout(() => setSuccess(''), 3000);
+        }
       } catch (err: any) {
         setError(err.message);
       }
@@ -463,12 +871,13 @@ export default function UserManagement() {
   const handleTerminateAllSessions = async () => {
     if (window.confirm('Tüm aktif oturumları sonlandırmak istiyor musunuz?')) {
       try {
-        let count = 0;
-        for (const session of activeSessions) {
-          const success = await apiClient.terminateSession(session.id, 'Yönetici tarafından sonlandırıldı');
-          if (success) count++;
-        }
-        setSuccess(`${count} oturum sonlandırıldı`);
+        // Tüm oturumları teker teker sonlandır
+        const terminatePromises = activeSessions.map(session => 
+          apiClient.terminateSession(session.id)
+        );
+        
+        await Promise.all(terminatePromises);
+        setSuccess('Tüm oturumlar sonlandırıldı');
         await loadData();
         
         setTimeout(() => setSuccess(''), 3000);
@@ -484,7 +893,6 @@ export default function UserManagement() {
       case 'admin': return 'bg-red-100 text-red-800';
       case 'manager': return 'bg-blue-100 text-blue-800';
       case 'doctor': return 'bg-green-100 text-green-800';
-      case 'nurse': return 'bg-purple-100 text-purple-800';
       case 'staff': return 'bg-orange-100 text-orange-800';
       case 'viewer': return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
@@ -496,7 +904,6 @@ export default function UserManagement() {
       case 'admin': return 'Sistem Yöneticisi';
       case 'manager': return 'Yönetici';
       case 'doctor': return 'Doktor';
-      case 'nurse': return 'Hemşire';
       case 'staff': return 'Personel';
       case 'viewer': return 'Gözlemci';
       default: return role;
@@ -520,59 +927,17 @@ export default function UserManagement() {
     }
   };
 
-  const handleBulkStatusChange = async (status: boolean) => {
-    if (selectedUsers.length === 0) {
-      setError('Lütfen en az bir kullanıcı seçin');
-      return;
-    }
-    
-    if (window.confirm(`${selectedUsers.length} kullanıcının durumunu ${status ? 'aktif' : 'pasif'} yapmak istiyor musunuz?`)) {
-      try {
-        for (const userId of selectedUsers) {
-          await apiClient.updateUser(userId, { isActive: status });
-        }
-        
-        setSuccess(`${selectedUsers.length} kullanıcı ${status ? 'aktif' : 'pasif'} yapıldı`);
-        setSelectedUsers([]);
-        await loadData();
-        
-        setTimeout(() => setSuccess(''), 3000);
-      } catch (err: any) {
-        setError(err.message);
-      }
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedUsers.length === 0) {
-      setError('Lütfen en az bir kullanıcı seçin');
-      return;
-    }
-    
-    if (window.confirm(`${selectedUsers.length} kullanıcıyı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
-      try {
-        let deletedCount = 0;
-        for (const userId of selectedUsers) {
-          const success = await apiClient.deleteUser(userId);
-          if (success) deletedCount++;
-        }
-        
-        setSuccess(`${deletedCount} kullanıcı silindi`);
-        setSelectedUsers([]);
-        await loadData();
-        
-        setTimeout(() => setSuccess(''), 3000);
-      } catch (err: any) {
-        setError(err.message);
-      }
-    }
-  };
-
   // Filtreleri temizle
   const handleClearFilters = () => {
     setSearchTerm('');
     setFilterRole('all');
     setFilterStatus('all');
+  };
+
+  // PostgreSQL bağlantısını yenile
+  const handleRefreshConnection = async () => {
+    await checkPostgreSQLConnection();
+    await loadData();
   };
 
   return (
@@ -601,7 +966,7 @@ export default function UserManagement() {
         <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
           <div className="flex items-center">
             <RefreshCw className="h-5 w-5 mr-2 animate-spin" />
-            <span>Veriler yükleniyor...</span>
+            <span>PostgreSQL verileri yükleniyor...</span>
           </div>
         </div>
       )}
@@ -610,17 +975,18 @@ export default function UserManagement() {
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 rounded-2xl p-6 text-white">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold mb-2">Kullanıcı Yönetimi</h1>
-            <p className="text-blue-200">Sistem kullanıcılarını yönetin, yetkileri düzenleyin ve oturumları izleyin</p>
+            <h1 className="text-2xl font-bold mb-2">PostgreSQL Kullanıcı Yönetimi</h1>
+            <p className="text-blue-200">PostgreSQL kullanıcılarını yönetin ve yetkileri düzenleyin</p>
           </div>
           <div className="flex items-center space-x-4">
+            <DatabaseStatus 
+              isConnected={dbStatus.connected} 
+              message={dbStatus.message}
+              onRefresh={handleRefreshConnection}
+            />
             <div className="text-center">
               <div className="text-2xl font-bold">{uniqueFilteredUsers.length}</div>
-              <div className="text-sm text-blue-300">Benzersiz Kullanıcı</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold">{activeSessions.length}</div>
-              <div className="text-sm text-blue-300">Aktif Oturum</div>
+              <div className="text-sm text-blue-300">PostgreSQL Kullanıcı</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold">{users.length}</div>
@@ -638,10 +1004,11 @@ export default function UserManagement() {
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
               type="text"
-              placeholder="Kullanıcı ara..."
+              placeholder="PostgreSQL kullanıcı ara..."
               className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              disabled={!dbStatus.connected}
             />
           </div>
 
@@ -651,6 +1018,7 @@ export default function UserManagement() {
               className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value)}
+              disabled={!dbStatus.connected}
             >
               <option value="all">Tüm Roller</option>
               <option value="admin">Yönetici</option>
@@ -664,6 +1032,7 @@ export default function UserManagement() {
               className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
+              disabled={!dbStatus.connected}
             >
               <option value="all">Tüm Durumlar</option>
               <option value="active">Aktif</option>
@@ -673,56 +1042,38 @@ export default function UserManagement() {
             <button
               onClick={handleClearFilters}
               className="px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl transition-colors flex items-center"
+              disabled={!dbStatus.connected}
             >
               <RefreshCw className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        {/* Toplu İşlemler */}
-        {selectedUsers.length > 0 && (
-          <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <CheckCircle className="h-5 w-5 text-orange-600 mr-2" />
-                <span className="font-medium text-orange-800">
-                  {selectedUsers.length} kullanıcı seçildi
-                </span>
-              </div>
-              <div className="flex gap-2">
+        {!dbStatus.connected && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+            <div className="flex items-center">
+              <Database className="h-5 w-5 text-red-600 mr-2" />
+              <p className="text-red-700">
+                PostgreSQL bağlantısı yok! Kullanıcı yönetimi için PostgreSQL veritabanına bağlı olmalısınız.
+                <br />
                 <button
-                  onClick={() => handleBulkStatusChange(true)}
-                  className="px-4 py-2 bg-green-500 text-white hover:bg-green-600 rounded-lg transition-colors flex items-center"
+                  onClick={handleRefreshConnection}
+                  className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium underline"
                 >
-                  <UserCheck className="h-4 w-4 mr-2" />
-                  Aktif Yap
+                  Bağlantıyı yeniden dene
                 </button>
-                <button
-                  onClick={() => handleBulkStatusChange(false)}
-                  className="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors flex items-center"
-                >
-                  <UserX className="h-4 w-4 mr-2" />
-                  Pasif Yap
-                </button>
-                <button
-                  onClick={handleBulkDelete}
-                  className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors flex items-center"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Seçilenleri Sil
-                </button>
-              </div>
+              </p>
             </div>
           </div>
         )}
 
-        {/* Benzersiz Kullanıcı Bilgisi */}
+        {/* PostgreSQL Bağlantı Bilgisi */}
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-center text-sm text-blue-700">
             <Info className="h-4 w-4 mr-2" />
             <span>
-              Tabloda kullanıcılar e-posta adreslerine göre benzersiz olarak gösterilmektedir. 
-              Her kullanıcı için en son giriş tarihi görüntülenir.
+              PostgreSQL veritabanındaki kullanıcılar yönetilmektedir. 
+              Yeni kullanıcılar PostgreSQL'e kaydedilir ve doğrudan giriş yapabilirler.
             </span>
           </div>
         </div>
@@ -738,9 +1089,10 @@ export default function UserManagement() {
                     checked={selectedUsers.length === uniqueFilteredUsers.length && uniqueFilteredUsers.length > 0}
                     onChange={handleSelectAll}
                     className="h-4 w-4 text-orange-600 rounded"
+                    disabled={!dbStatus.connected}
                   />
                 </th>
-                <th className="py-4 px-6 text-left text-sm font-semibold text-gray-900">Kullanıcı</th>
+                <th className="py-4 px-6 text-left text-sm font-semibold text-gray-900">PostgreSQL Kullanıcı</th>
                 <th className="py-4 px-6 text-left text-sm font-semibold text-gray-900">Rol</th>
                 <th className="py-4 px-6 text-left text-sm font-semibold text-gray-900">Departman</th>
                 <th className="py-4 px-6 text-left text-sm font-semibold text-gray-900">Durum</th>
@@ -840,9 +1192,9 @@ export default function UserManagement() {
                         <Shield className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleToggleUserStatus(user.id)}
-                        className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
-                        title="Durumu Değiştir"
+                        onClick={() => handleChangePassword(user)}
+                        className="p-2 text-yellow-600 hover:text-yellow-800 hover:bg-yellow-50 rounded-lg transition-colors"
+                        title="Şifre Değiştir"
                       >
                         <Power className="h-4 w-4" />
                       </button>
@@ -874,6 +1226,7 @@ export default function UserManagement() {
           <button
             onClick={() => setShowNewUserModal(true)}
             className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center shadow-lg hover:shadow-xl"
+            disabled={!dbStatus.connected}
           >
             <UserPlus className="h-5 w-5 mr-3" />
             Yeni Kullanıcı Ekle
@@ -908,9 +1261,9 @@ export default function UserManagement() {
                     <p className="text-sm text-gray-600 mt-1">
                       <span className="capitalize">{session.userRole}</span>
                       <span className="mx-2">•</span>
-                      {session.deviceInfo?.browser}
+                      {session.deviceInfo?.browser || 'Tarayıcı bilinmiyor'}
                       <span className="mx-2">•</span>
-                      {session.deviceInfo?.os}
+                      {session.deviceInfo?.os || 'OS bilinmiyor'}
                     </p>
                   </div>
                   <button
@@ -922,7 +1275,7 @@ export default function UserManagement() {
                   </button>
                 </div>
                 <div className="mt-3 text-xs text-gray-500">
-                  <span>IP: {session.ipAddress}</span>
+                  <span>IP: {session.ipAddress || 'Bilinmiyor'}</span>
                   <span className="mx-2">•</span>
                   <span>Giriş: {formatLastLogin(session.loginTime)}</span>
                 </div>
@@ -956,6 +1309,7 @@ export default function UserManagement() {
                       log.action.includes('CREATE') ? 'bg-green-100 text-green-800' :
                       log.action.includes('UPDATE') ? 'bg-blue-100 text-blue-800' :
                       log.action.includes('DELETE') ? 'bg-red-100 text-red-800' :
+                      log.action.includes('LOGIN') ? 'bg-purple-100 text-purple-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
                       {log.action}
@@ -994,67 +1348,85 @@ export default function UserManagement() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Ad Soyad
+                    Ad Soyad *
                   </label>
                   <input
                     type="text"
                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     value={newUserForm.name}
                     onChange={(e) => setNewUserForm({...newUserForm, name: e.target.value})}
+                    required
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email
+                    Email *
                   </label>
                   <input
                     type="email"
                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     value={newUserForm.email}
                     onChange={(e) => setNewUserForm({...newUserForm, email: e.target.value})}
+                    required
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Şifre
+                      Şifre * (min. 6 karakter)
                     </label>
                     <input
-                      type="password"
+                      type={newUserForm.showPassword ? "text" : "password"}
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                       value={newUserForm.password}
                       onChange={(e) => setNewUserForm({...newUserForm, password: e.target.value})}
+                      required
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Şifre Tekrar
+                      Şifre Tekrar *
                     </label>
                     <input
-                      type="password"
+                      type={newUserForm.showPassword ? "text" : "password"}
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                       value={newUserForm.confirmPassword}
                       onChange={(e) => setNewUserForm({...newUserForm, confirmPassword: e.target.value})}
+                      required
                     />
                   </div>
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="showPassword"
+                    className="h-4 w-4 text-orange-600 rounded"
+                    checked={newUserForm.showPassword}
+                    onChange={(e) => setNewUserForm({...newUserForm, showPassword: e.target.checked})}
+                  />
+                  <label htmlFor="showPassword" className="ml-2 text-sm text-gray-600">
+                    Şifreyi göster
+                  </label>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Rol
+                      Rol *
                     </label>
                     <select
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                       value={newUserForm.role}
                       onChange={(e) => setNewUserForm({...newUserForm, role: e.target.value as User['role']})}
+                      required
                     >
                       <option value="staff">Personel</option>
                       <option value="manager">Yönetici</option>
+                      <option value="admin">Sistem Yöneticisi</option>
                       <option value="doctor">Doktor</option>
-                      <option value="nurse">Hemşire</option>
                       <option value="viewer">Gözlemci</option>
                     </select>
                   </div>
@@ -1086,7 +1458,7 @@ export default function UserManagement() {
 
               <div className="mt-6 flex gap-3">
                 <button
-                  onClick={handleAddUser}
+                  onClick={handleCreateUser}
                   disabled={loading}
                   className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white py-3 rounded-xl font-semibold transition-all disabled:opacity-50"
                 >
@@ -1161,8 +1533,8 @@ export default function UserManagement() {
                     >
                       <option value="staff">Personel</option>
                       <option value="manager">Yönetici</option>
+                      <option value="admin">Sistem Yöneticisi</option>
                       <option value="doctor">Doktor</option>
-                      <option value="nurse">Hemşire</option>
                       <option value="viewer">Gözlemci</option>
                     </select>
                   </div>
@@ -1299,6 +1671,72 @@ export default function UserManagement() {
                 </button>
                 <button
                   onClick={() => setShowPermissionModal(false)}
+                  className="flex-1 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 py-3 rounded-xl font-medium transition-colors"
+                >
+                  İptal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Şifre Değiştirme Modal */}
+      {showPasswordModal && passwordUser && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center">
+                  <Power className="h-5 w-5 mr-2 text-orange-600" />
+                  Şifre Değiştir: {passwordUser.name}
+                </h2>
+                <button
+                  onClick={() => setShowPasswordModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Yeni Şifre (min. 6 karakter)
+                  </label>
+                  <input
+                    type="password"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Yeni Şifre Tekrar
+                  </label>
+                  <input
+                    type="password"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={handleUpdatePassword}
+                  disabled={loading}
+                  className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white py-3 rounded-xl font-semibold transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Değiştiriliyor...' : 'Şifreyi Değiştir'}
+                </button>
+                <button
+                  onClick={() => setShowPasswordModal(false)}
                   className="flex-1 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 py-3 rounded-xl font-medium transition-colors"
                 >
                   İptal

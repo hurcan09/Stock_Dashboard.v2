@@ -1,5 +1,6 @@
-// src/App.tsx - GÜNCELLENMİŞ VERSİYON
+// src/App.tsx - POSTGRESQL GÜNCELLEMESİ
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MaterialManagement from './components/MaterialManagement';
 import StockCountManagement from './components/StockCountManagement';
 import PatientManagement from './components/PatientManagement';
@@ -8,56 +9,77 @@ import Reports from './components/Reports';
 import Auth from './components/Auth';
 import Layout from './components/Layout';
 import Anasayfa from './components/Anasayfa';
-import DoctorManagement from './components/DoctorManagement.tsx';
+import DoctorManagement from './components/DoctorManagement';
 import UserManagement from './components/UserManagement';
-import { dataService } from './utils/dataService';
-import { User } from './types';
-import { AuthProvider, useAuth } from './components/AuthContext.tsx';
-
-interface AuthProps {
-  onLogin: (userData: User) => void;
-}
+import { AuthProvider, useAuth } from './components/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import { dataServiceSQL } from './utils/dataServiceSQL';
 
 // Ana uygulama bileşeni
 function AppContent() {
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, checkAuthStatus } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [dbStatus, setDbStatus] = useState<{
+    connected: boolean;
+    message: string;
+  }>({ connected: false, message: 'PostgreSQL bağlantısı kontrol ediliyor...' });
 
   useEffect(() => {
     console.log('🔄 App component yüklendi');
     
-    const checkAuth = () => {
-      const currentUserData = localStorage.getItem('currentUser');
-      
-      if (currentUserData) {
-        try {
-          const parsedUser = JSON.parse(currentUserData);
-          if (parsedUser && parsedUser.id) {
-            console.log('✅ LocalStorage\'dan kullanıcı bulundu:', parsedUser.name);
-            setLoading(false);
-            return;
-          }
-        } catch (error) {
-          console.error('❌ Kullanıcı verisi parse edilemedi:', error);
+    const initializeApp = async () => {
+      try {
+        // PostgreSQL bağlantısını kontrol et
+        const healthCheck = await dataServiceSQL.healthCheck();
+        const isConnected = healthCheck.status === 'OK' && healthCheck.database === 'Connected';
+        
+        setDbStatus({
+          connected: isConnected,
+          message: isConnected 
+            ? '✅ PostgreSQL bağlantısı başarılı' 
+            : '❌ PostgreSQL bağlantısı yok'
+        });
+
+        if (!isConnected) {
+          console.warn('⚠️ PostgreSQL bağlantısı yok! Demo moda geçiliyor...');
         }
+
+        // Auth durumunu kontrol et
+        await checkAuthStatus();
+
+      } catch (error) {
+        console.error('❌ Uygulama başlatma hatası:', error);
+        setDbStatus({
+          connected: false,
+          message: '❌ PostgreSQL sunucusuna bağlanılamıyor'
+        });
+      } finally {
+        setLoading(false);
       }
-      
-      const adminUser = dataService.getUsers().find(u => u.role === 'admin');
-      
-      if (adminUser) {
-        console.log('✅ Admin kullanıcı bulundu, otomatik giriş yapılıyor:', adminUser.name);
-        dataService.setCurrentUser(adminUser);
-      } else {
-        console.log('❌ Admin kullanıcı bulunamadı, auth ekranı gösteriliyor');
-      }
-      setLoading(false);
     };
 
-    const timer = setTimeout(checkAuth, 1000);
-    
-    return () => clearTimeout(timer);
-  }, []);
+    initializeApp();
+
+    // Her 30 saniyede bir bağlantıyı kontrol et
+    const interval = setInterval(async () => {
+      try {
+        const healthCheck = await dataServiceSQL.healthCheck();
+        const isConnected = healthCheck.status === 'OK' && healthCheck.database === 'Connected';
+        
+        setDbStatus({
+          connected: isConnected,
+          message: isConnected 
+            ? '✅ PostgreSQL bağlantısı başarılı' 
+            : '❌ PostgreSQL bağlantısı yok'
+        });
+      } catch (error) {
+        console.error('❌ Bağlantı kontrol hatası:', error);
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [checkAuthStatus]);
 
   const renderPage = () => {
     switch (currentPage) {
@@ -82,7 +104,7 @@ function AppContent() {
       case 'doctors':
         return <DoctorManagement />;
       case 'daily-plan':
-        return <div>Günlük Plan (Yapım aşamasında)</div>;
+        return <div className="p-8">Günlük Plan (Yapım aşamasında)</div>;
       default:
         return <Anasayfa />;
     }
@@ -90,7 +112,7 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center">
         <div className="relative">
           <div className="animate-spin rounded-full h-24 w-24 border-b-2 border-orange-500"></div>
           <div className="absolute inset-0 flex items-center justify-center">
@@ -109,22 +131,37 @@ function AppContent() {
         <div className="text-2xl font-bold text-white mt-6 mb-2">
           Osmangazi Göz Stok Takip Sistemi
         </div>
-        <div className="text-blue-200">
-          Sistem hazırlanıyor...
+        <div className="text-orange-300 mb-4">
+          PostgreSQL bağlantısı kuruluyor...
+        </div>
+        <div className={`px-4 py-2 rounded-lg ${
+          dbStatus.connected 
+            ? 'bg-green-900/30 text-green-300 border border-green-800/50' 
+            : 'bg-red-900/30 text-red-300 border border-red-800/50'
+        }`}>
+          {dbStatus.message}
         </div>
       </div>
     );
   }
 
   if (!isAuthenticated) {
-    const AuthComponent = Auth as React.FC<AuthProps>;
-    return <AuthComponent onLogin={() => {}} />;
+    const AuthComponent = Auth as React.FC<{ onLogin: (user: any) => void }>;
+    return (
+      <AuthComponent 
+        onLogin={() => {
+          // Login olduktan sonra sayfayı yenile
+          window.location.reload();
+        }} 
+      />
+    );
   }
 
   return (
     <Layout
       currentPage={currentPage}
       onPageChange={setCurrentPage}
+      dbStatus={dbStatus}
     >
       {renderPage()}
     </Layout>
@@ -135,7 +172,24 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={
+            <div className="min-h-screen">
+              <Auth onLogin={() => {}} />
+            </div>
+          } />
+          
+          <Route path="/" element={
+            <ProtectedRoute>
+              <AppContent />
+            </ProtectedRoute>
+          } />
+          
+          {/* Diğer route'lar için de ProtectedRoute kullanabilirsiniz */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   );
 }

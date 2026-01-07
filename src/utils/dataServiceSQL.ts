@@ -1,511 +1,851 @@
 // src/utils/dataServiceSQL.ts
-import { Pool } from 'pg';
-import {
-  Material, User, Patient, Invoice, StockCount, StockCountSession,
-  Category, Supplier, PatientMaterialUsage, SystemLog,
-  DailyPlan, Doctor, UserSession, ActivityLog,
-  DashboardStats, MaterialStatus
-} from '../types';
+// PostgreSQL veritabanı senkronizasyon servisi - GÜNCELLENMİŞ
 
-// Neon PostgreSQL bağlantısı - Render'daki env değişkeni
-const pool = new Pool({
-  connectionString: process.env.NEXT_PUBLIC_DATABASE_URL || 
-                   'postgresql://username:password@ep-cool-cloud-123456.eu-central-1.aws.neon.tech/database',
-  ssl: { rejectUnauthorized: false }
-});
+import { Material, Category, Supplier, User } from '../types';
 
-class DataServiceSQL {
-  // ============ KULLANICI İŞLEMLERİ ============
+const API_BASE_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:10000/api'
+  : '/api';
+
+export class DataServiceSQL {
+  private static instance: DataServiceSQL;
+  private token: string | null = null;
+
+  private constructor() {
+    // Token'ı localStorage'dan al
+    this.token = localStorage.getItem('token');
+    
+    // Eğer token yoksa ve kullanıcı giriş yapmışsa, localStorage'dan user'dan al
+    if (!this.token) {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          if (user.token) {
+            this.token = user.token;
+            localStorage.setItem('token', user.token);
+          }
+        } catch (error) {
+          console.error('❌ User parse error:', error);
+        }
+      }
+    }
+  }
+
+  public static getInstance(): DataServiceSQL {
+    if (!DataServiceSQL.instance) {
+      DataServiceSQL.instance = new DataServiceSQL();
+    }
+    return DataServiceSQL.instance;
+  }
+
+  setToken(token: string) {
+    this.token = token;
+    localStorage.setItem('token', token);
+  }
+
+  clearToken() {
+    this.token = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  }
+
+  private async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    
+    // Token'ı her seferinde localStorage'dan kontrol et
+    const currentToken = localStorage.getItem('token') || this.token;
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': currentToken ? `Bearer ${currentToken}` : '',
+      ...options.headers
+    };
+
+    console.log(`📡 API Request: ${options.method || 'GET'} ${url}`);
+    console.log(`🔑 Token Status: ${currentToken ? 'Present' : 'Missing'}`);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        mode: 'cors',
+        credentials: 'include'
+      });
+
+      console.log(`📡 API Response: ${response.status} ${response.statusText}`);
+
+      if (response.status === 401) {
+        this.clearToken();
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+      }
+
+      if (response.status === 403) {
+        throw new Error('Bu işlem için yetkiniz yok.');
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ API Error Response:', errorText);
+        
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      console.log('✅ API Success Response:', data);
+      return data;
+
+    } catch (error) {
+      console.error('❌ API Request Error:', error);
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          throw new Error('Sunucuya bağlanılamıyor. Lütfen internet bağlantınızı kontrol edin ve sunucunun çalıştığından emin olun.');
+        }
+        throw error;
+      }
+      
+      throw new Error('Bilinmeyen bir hata oluştu.');
+    }
+  }
+
+  // ==================== MATERIALS ====================
+
+  async getMaterials(params?: {
+    search?: string;
+    category?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: string;
+    sortOrder?: string;
+  }): Promise<Material[]> {
+    try {
+      console.log('📦 PostgreSQL malzemeleri yükleniyor...');
+      
+      // Önce localStorage'dan token kontrolü yap
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.warn('⚠️ Token bulunamadı, boş dizi döndürülüyor');
+        return [];
+      }
+
+      const queryParams = new URLSearchParams();
+      
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== '') {
+            queryParams.append(key, String(value));
+          }
+        });
+      }
+      
+      const queryString = queryParams.toString();
+      const response = await this.request(`/materials${queryString ? `?${queryString}` : ''}`);
+      
+      if (response.success && Array.isArray(response.data)) {
+        const materials = response.data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          barcode: item.barcode,
+          gtin: item.gtin,
+          sn: item.sn,
+          udiCode: item.udiCode,
+          allBarcode: item.allBarcode,
+          intuitiveCode: item.intuitiveCode,
+          category: item.category,
+          subCategory: item.subCategory,
+          unit: item.unit,
+          unitPrice: parseFloat(item.unitPrice) || 0,
+          currentStock: parseInt(item.currentStock) || 0,
+          minStock: parseInt(item.minStock) || 0,
+          supplier: item.supplier,
+          expirationDate: item.expirationDate,
+          serialNoStatus: item.serialNoStatus,
+          materialDescription: item.materialDescription,
+          status: item.status || 'normal',
+          createdBy: item.createdBy,
+          updatedBy: item.updatedBy,
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        
+        console.log(`✅ ${materials.length} malzeme PostgreSQL'den yüklendi`);
+        return materials;
+      }
+      
+      console.warn('⚠️ Veri formatı beklenenden farklı:', response);
+      return [];
+      
+    } catch (error) {
+      console.error('❌ Malzemeler getirilemedi:', error);
+      
+      // Hata durumunda kullanıcıya bilgi ver
+      if (error instanceof Error) {
+        if (error.message.includes('Sunucuya bağlanılamıyor')) {
+          alert('❌ PostgreSQL sunucusuna bağlanılamıyor. Lütfen:\n1. Sunucunun çalıştığından emin olun\n2. İnternet bağlantınızı kontrol edin\n3. Terminalde "npm run server" komutunu çalıştırın');
+        }
+      }
+      
+      return [];
+    }
+  }
+
+  async getMaterial(id: string): Promise<Material | null> {
+    try {
+      console.log(`📦 Malzeme detayı yükleniyor: ${id}`);
+      
+      const response = await this.request(`/materials/${id}`);
+      
+      if (response.success && response.data) {
+        const item = response.data;
+        return {
+          id: item.id.toString(),
+          name: item.name,
+          barcode: item.barcode,
+          gtin: item.gtin,
+          sn: item.sn,
+          udiCode: item.udiCode,
+          allBarcode: item.allBarcode,
+          intuitiveCode: item.intuitiveCode,
+          category: item.category,
+          subCategory: item.subCategory,
+          unit: item.unit,
+          unitPrice: parseFloat(item.unitPrice) || 0,
+          currentStock: parseInt(item.currentStock) || 0,
+          minStock: parseInt(item.minStock) || 0,
+          supplier: item.supplier,
+          expirationDate: item.expirationDate,
+          serialNoStatus: item.serialNoStatus,
+          materialDescription: item.materialDescription,
+          status: item.status || 'normal',
+          createdBy: item.createdBy,
+          updatedBy: item.updatedBy,
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Malzeme getirilemedi:', error);
+      return null;
+    }
+  }
+
+  async addMaterial(material: Omit<Material, 'id' | 'createdAt' | 'updatedAt'>): Promise<Material> {
+    try {
+      console.log('➕ Yeni malzeme PostgreSQL\'e ekleniyor:', material.name);
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Lütfen önce giriş yapın. Token bulunamadı.');
+      }
+
+      const response = await this.request('/materials', {
+        method: 'POST',
+        body: JSON.stringify(material)
+      });
+      
+      console.log('✅ Malzeme ekleme response:', response);
+      
+      if (response.success) {
+        const newMaterial: Material = {
+          ...material,
+          id: response.id || Date.now().toString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        
+        console.log('✅ Malzeme başarıyla eklendi:', newMaterial.name);
+        return newMaterial;
+      }
+      
+      throw new Error(response.error || 'Malzeme eklenemedi');
+      
+    } catch (error) {
+      console.error('❌ Malzeme eklenemedi:', error);
+      
+      let errorMessage = 'Malzeme eklenemedi!';
+      if (error instanceof Error) {
+        if (error.message.includes('Bu barkod zaten kayıtlı')) {
+          errorMessage = '❌ Bu barkod zaten başka bir malzemede kullanılıyor!';
+        } else if (error.message.includes('Lütfen önce giriş yapın')) {
+          errorMessage = '❌ Lütfen önce giriş yapın!';
+          window.location.href = '/login';
+        } else {
+          errorMessage = `❌ ${error.message}`;
+        }
+      }
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  async updateMaterial(id: string, updates: Partial<Material>): Promise<void> {
+    try {
+      console.log('✏️ Malzeme güncelleniyor:', id);
+      
+      const response = await this.request(`/materials/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      });
+      
+      if (response.success) {
+        console.log('✅ Malzeme başarıyla güncellendi');
+      } else {
+        throw new Error(response.error || 'Malzeme güncellenemedi');
+      }
+    } catch (error) {
+      console.error('❌ Malzeme güncellenemedi:', error);
+      throw error;
+    }
+  }
+
+  async deleteMaterial(id: string): Promise<void> {
+    try {
+      console.log('🗑️ Malzeme siliniyor:', id);
+      
+      const response = await this.request(`/materials/${id}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.success) {
+        console.log('✅ Malzeme başarıyla silindi');
+      } else {
+        throw new Error(response.error || 'Malzeme silinemedi');
+      }
+    } catch (error) {
+      console.error('❌ Malzeme silinemedi:', error);
+      throw error;
+    }
+  }
+
+  async bulkUpdateMaterials(materialIds: string[], updates: any): Promise<void> {
+    try {
+      console.log('✏️ Toplu malzeme güncelleniyor:', materialIds.length, 'malzeme');
+      
+      const response = await this.request('/materials/bulk-update', {
+        method: 'POST',
+        body: JSON.stringify({ materialIds, updates })
+      });
+      
+      if (response.success) {
+        console.log('✅ Toplu güncelleme başarılı');
+      } else {
+        throw new Error(response.error || 'Toplu güncelleme yapılamadı');
+      }
+    } catch (error) {
+      console.error('❌ Toplu güncelleme yapılamadı:', error);
+      throw error;
+    }
+  }
+
+  // ==================== CATEGORIES ====================
+
+  async getCategories(): Promise<Category[]> {
+    try {
+      console.log('🏷️ Kategoriler yükleniyor...');
+      
+      const response = await this.request('/categories');
+      
+      if (response.success && Array.isArray(response.data)) {
+        const categories = response.data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          description: item.description,
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        
+        console.log(`✅ ${categories.length} kategori yüklendi`);
+        return categories;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ Kategoriler getirilemedi:', error);
+      return [];
+    }
+  }
+
+  async addCategory(category: Omit<Category, 'id'>): Promise<Category> {
+    try {
+      console.log('➕ Yeni kategori ekleniyor:', category.name);
+      
+      const response = await this.request('/categories', {
+        method: 'POST',
+        body: JSON.stringify(category)
+      });
+      
+      if (response.success) {
+        const newCategory: Category = {
+          ...category,
+          id: response.id || Date.now().toString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        
+        console.log('✅ Kategori başarıyla eklendi');
+        return newCategory;
+      }
+      
+      throw new Error(response.error || 'Kategori eklenemedi');
+    } catch (error) {
+      console.error('❌ Kategori eklenemedi:', error);
+      throw error;
+    }
+  }
+
+  // ==================== SUPPLIERS ====================
+
+  async getSuppliers(): Promise<Supplier[]> {
+    try {
+      console.log('🏢 Tedarikçiler yükleniyor...');
+      
+      const response = await this.request('/suppliers');
+      
+      if (response.success && Array.isArray(response.data)) {
+        const suppliers = response.data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          contactPerson: item.contactPerson,
+          email: item.email,
+          phone: item.phone,
+          address: item.address,
+          taxNumber: item.taxNumber,
+          taxOffice: item.taxOffice,
+          description: item.description,
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        
+        console.log(`✅ ${suppliers.length} tedarikçi yüklendi`);
+        return suppliers;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ Tedarikçiler getirilemedi:', error);
+      return [];
+    }
+  }
+
+  async addSupplier(supplier: Omit<Supplier, 'id'>): Promise<Supplier> {
+    try {
+      console.log('➕ Yeni tedarikçi ekleniyor:', supplier.name);
+      
+      const response = await this.request('/suppliers', {
+        method: 'POST',
+        body: JSON.stringify(supplier)
+      });
+      
+      if (response.success) {
+        const newSupplier: Supplier = {
+          ...supplier,
+          id: response.id || Date.now().toString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        
+        console.log('✅ Tedarikçi başarıyla eklendi');
+        return newSupplier;
+      }
+      
+      throw new Error(response.error || 'Tedarikçi eklenemedi');
+    } catch (error) {
+      console.error('❌ Tedarikçi eklenemedi:', error);
+      throw error;
+    }
+  }
+
+  // ==================== USERS ====================
+
   async getUsers(): Promise<User[]> {
     try {
-      const result = await pool.query(`
-        SELECT id, username, email, password, full_name as name, phone, department, 
-               role, is_active as "isActive", last_login as "lastLogin",
-               last_login_ip as "lastLoginIp", avatar_color as "avatarColor",
-               session_timeout as "sessionTimeout", can_view_pages as "canViewPages",
-               can_edit_pages as "canEditPages", permissions,
-               created_at as "createdAt", updated_at as "updatedAt"
-        FROM users 
-        ORDER BY created_at DESC
-      `);
-      return this.mapUsersFromDB(result.rows);
+      console.log('👥 Kullanıcılar yükleniyor...');
+      
+      const response = await this.request('/users');
+      
+      if (Array.isArray(response)) {
+        const users = response.map((item: any) => ({
+          id: item.id,
+          username: item.username,
+          email: item.email,
+          password: item.password || '',
+          name: item.name,
+          phone: item.phone,
+          department: item.department,
+          role: item.role || 'user',
+          permissions: item.permissions || {},
+          avatarColor: item.avatarColor || '#4F46E5',
+          isActive: item.isActive !== false,
+          lastLogin: item.lastLogin,
+          lastLoginIp: item.lastLoginIp,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        
+        console.log(`✅ ${users.length} kullanıcı yüklendi`);
+        return users;
+      }
+      
+      return [];
     } catch (error) {
-      console.error('Kullanıcıları getirme hatası:', error);
+      console.error('❌ Kullanıcılar getirilemedi:', error);
       return [];
     }
   }
 
-  async getUserById(id: string): Promise<User | null> {
+  async getCurrentUser(): Promise<User> {
     try {
-      const result = await pool.query(
-        `SELECT * FROM users WHERE id = $1`,
-        [id]
-      );
-      if (result.rows.length === 0) return null;
-      return this.mapUserFromDB(result.rows[0]);
+      console.log('👤 Mevcut kullanıcı bilgisi alınıyor...');
+      
+      const response = await this.request('/auth/me');
+      
+      if (response.success && response.user) {
+        const user = response.user;
+        const currentUser = {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          password: '',
+          name: user.name,
+          phone: user.phone || '',
+          department: user.department || '',
+          role: user.role || 'user',
+          permissions: user.permissions || {},
+          avatarColor: user.avatarColor || '#4F46E5',
+          isActive: true,
+          lastLogin: null,
+          lastLoginIp: '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        
+        // localStorage'a kaydet
+        localStorage.setItem('user', JSON.stringify(currentUser));
+        console.log('✅ Kullanıcı bilgisi alındı:', currentUser.name);
+        return currentUser;
+      }
+      
+      throw new Error('Kullanıcı bilgisi alınamadı');
+      
     } catch (error) {
-      console.error('Kullanıcı getirme hatası:', error);
-      return null;
-    }
-  }
-
-  async saveUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
-    try {
-      const result = await pool.query(`
-        INSERT INTO users (
-          username, email, password, full_name, phone, department, role,
-          permissions, avatar_color, session_timeout, can_view_pages, can_edit_pages
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING *
-      `, [
-        userData.username,
-        userData.email,
-        userData.password,
-        userData.name,
-        userData.phone || '',
-        userData.department,
-        userData.role,
-        JSON.stringify(userData.permissions),
-        userData.avatarColor || '#4F46E5',
-        userData.sessionTimeout || 30,
-        JSON.stringify(userData.canViewPages || []),
-        JSON.stringify(userData.canEditPages || [])
-      ]);
-
-      return this.mapUserFromDB(result.rows[0]);
-    } catch (error) {
-      console.error('Kullanıcı kaydetme hatası:', error);
-      throw error;
-    }
-  }
-
-  async updateUser(id: string, updates: Partial<User>): Promise<User | null> {
-    try {
-      const setClauses: string[] = [];
-      const values: any[] = [];
-      let paramCount = 1;
-
-      // İzin verilen alanları güncelle
-      const allowedFields = [
-        'username', 'email', 'full_name', 'phone', 'department', 'role',
-        'permissions', 'avatar_color', 'session_timeout', 'can_view_pages',
-        'can_edit_pages', 'is_active', 'last_login', 'last_login_ip'
-      ];
-
-      Object.entries(updates).forEach(([key, value]) => {
-        const dbField = this.mapToDbField(key);
-        if (allowedFields.includes(dbField)) {
-          setClauses.push(`${dbField} = $${paramCount}`);
-          
-          if (key === 'permissions' || key === 'canViewPages' || key === 'canEditPages') {
-            values.push(JSON.stringify(value));
-          } else if (key === 'name') {
-            values.push(value); // full_name'e dönüştürülecek
-          } else {
-            values.push(value);
-          }
-          paramCount++;
+      console.error('❌ Kullanıcı bilgisi alınamadı:', error);
+      
+      // Fallback: localStorage'dan al
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          console.log('⚠️ Kullanıcı localStorage\'dan yüklendi');
+          return user;
+        } catch {
+          // JSON parse hatası
         }
-      });
-
-      if (setClauses.length === 0) return null;
-
-      setClauses.push('updated_at = NOW()');
+      }
       
-      const query = `
-        UPDATE users 
-        SET ${setClauses.join(', ')}
-        WHERE id = $${paramCount}
-        RETURNING *
-      `;
-      values.push(id);
-
-      const result = await pool.query(query, values);
-      if (result.rows.length === 0) return null;
-      
-      return this.mapUserFromDB(result.rows[0]);
-    } catch (error) {
-      console.error('Kullanıcı güncelleme hatası:', error);
-      return null;
-    }
-  }
-
-  async deleteUser(id: string): Promise<boolean> {
-    try {
-      const result = await pool.query(
-        `DELETE FROM users WHERE id = $1 RETURNING id`,
-        [id]
-      );
-      return result.rows.length > 0;
-    } catch (error) {
-      console.error('Kullanıcı silme hatası:', error);
-      return false;
-    }
-  }
-
-  // ============ MALZEME İŞLEMLERİ (TÜM KULLANICILAR AYNI VERİYİ GÖRÜR) ============
-  async getMaterials(): Promise<Material[]> {
-    try {
-      const result = await pool.query(`
-        SELECT id, name, barcode, gtin, sn, udi_code as "udiCode",
-               all_barcode as "allBarcode", intuitive_code as "intuitiveCode",
-               serial_number as "serialNumber", category, sub_category as "subCategory",
-               unit, unit_price as "unitPrice", current_stock as "currentStock",
-               min_stock_level as "minStockLevel", min_stock as "minStock",
-               supplier, expiration_date as "expirationDate",
-               serial_no_status as "serialNoStatus", material_description as "materialDescription",
-               location, is_active as "isActive", status,
-               last_stock_count_date as "lastStockCountDate",
-               last_stock_count_by as "lastStockCountBy",
-               last_stock_count_quantity as "lastStockCountQuantity",
-               created_at as "createdAt", updated_at as "updatedAt"
-        FROM materials
-        WHERE is_active = true
-        ORDER BY name
-      `);
-      return this.mapMaterialsFromDB(result.rows);
-    } catch (error) {
-      console.error('Malzemeleri getirme hatası:', error);
-      return [];
-    }
-  }
-
-  async getMaterialById(id: string): Promise<Material | null> {
-    try {
-      const result = await pool.query(
-        `SELECT * FROM materials WHERE id = $1 AND is_active = true`,
-        [id]
-      );
-      if (result.rows.length === 0) return null;
-      return this.mapMaterialFromDB(result.rows[0]);
-    } catch (error) {
-      console.error('Malzeme getirme hatası:', error);
-      return null;
-    }
-  }
-
-  async saveMaterial(materialData: Omit<Material, 'id' | 'createdAt' | 'updatedAt'>): Promise<Material> {
-    try {
-      const result = await pool.query(`
-        INSERT INTO materials (
-          name, barcode, gtin, sn, udi_code, all_barcode, intuitive_code,
-          serial_number, category, sub_category, unit, unit_price,
-          current_stock, min_stock_level, min_stock, supplier,
-          expiration_date, serial_no_status, material_description,
-          location, is_active, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                  $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-        RETURNING *
-      `, [
-        materialData.name,
-        materialData.barcode,
-        materialData.gtin || '',
-        materialData.sn || '',
-        materialData.udiCode || '',
-        materialData.allBarcode || '',
-        materialData.intuitiveCode || '',
-        materialData.serialNumber || '',
-        materialData.category,
-        materialData.subCategory || '',
-        materialData.unit,
-        materialData.unitPrice,
-        materialData.currentStock,
-        materialData.minStockLevel || materialData.minStock,
-        materialData.minStock,
-        materialData.supplier || '',
-        materialData.expirationDate || null,
-        materialData.serialNoStatus || '',
-        materialData.materialDescription || materialData.name,
-        materialData.location || '',
-        true,
-        materialData.status || 'normal'
-      ]);
-
-      return this.mapMaterialFromDB(result.rows[0]);
-    } catch (error) {
-      console.error('Malzeme kaydetme hatası:', error);
-      throw error;
-    }
-  }
-
-  async updateMaterial(id: string, updates: Partial<Material>): Promise<Material | null> {
-    try {
-      const setClauses: string[] = [];
-      const values: any[] = [];
-      let paramCount = 1;
-
-      Object.entries(updates).forEach(([key, value]) => {
-        const dbField = this.mapToDbField(key);
-        setClauses.push(`${dbField} = $${paramCount}`);
-        values.push(value);
-        paramCount++;
-      });
-
-      if (setClauses.length === 0) return null;
-
-      setClauses.push('updated_at = NOW()');
-      
-      const query = `
-        UPDATE materials 
-        SET ${setClauses.join(', ')}
-        WHERE id = $${paramCount}
-        RETURNING *
-      `;
-      values.push(id);
-
-      const result = await pool.query(query, values);
-      if (result.rows.length === 0) return null;
-      
-      return this.mapMaterialFromDB(result.rows[0]);
-    } catch (error) {
-      console.error('Malzeme güncelleme hatası:', error);
-      return null;
-    }
-  }
-
-  async deleteMaterial(id: string): Promise<boolean> {
-    try {
-      // Soft delete yapıyoruz (is_active = false)
-      const result = await pool.query(
-        `UPDATE materials SET is_active = false WHERE id = $1 RETURNING id`,
-        [id]
-      );
-      return result.rows.length > 0;
-    } catch (error) {
-      console.error('Malzeme silme hatası:', error);
-      return false;
-    }
-  }
-
-  // ============ DASHBOARD İSTATİSTİKLERİ ============
-  async getDashboardStats(): Promise<DashboardStats> {
-    try {
-      // Toplam malzeme sayısı
-      const materialsResult = await pool.query(`SELECT COUNT(*) FROM materials WHERE is_active = true`);
-      const totalMaterials = parseInt(materialsResult.rows[0].count);
-
-      // Toplam hasta sayısı
-      const patientsResult = await pool.query(`SELECT COUNT(*) FROM patients WHERE is_active = true`);
-      const totalPatients = parseInt(patientsResult.rows[0].count);
-
-      // Toplam stok değeri
-      const stockValueResult = await pool.query(`
-        SELECT SUM(current_stock * unit_price) as total_value 
-        FROM materials 
-        WHERE is_active = true
-      `);
-      const totalStockValue = parseFloat(stockValueResult.rows[0].total_value || 0);
-
-      // Kritik stok sayısı
-      const criticalStockResult = await pool.query(`
-        SELECT COUNT(*) 
-        FROM materials 
-        WHERE is_active = true AND current_stock <= min_stock
-      `);
-      const criticalStockCount = parseInt(criticalStockResult.rows[0].count);
-
-      // Son malzemeler
-      const lowStockMaterialsResult = await pool.query(`
-        SELECT * FROM materials 
-        WHERE is_active = true AND current_stock <= min_stock
-        LIMIT 5
-      `);
-      const lowStockMaterials = this.mapMaterialsFromDB(lowStockMaterialsResult.rows);
-
+      console.log('⚠️ Varsayılan misafir kullanıcı oluşturuldu');
+      // Varsayılan misafir kullanıcı
       return {
-        totalMaterials,
-        totalPatients,
-        totalStockValue,
-        criticalStockCount,
-        totalUsageCost: 0, // TODO: Hasta malzeme kullanımından hesapla
-        lowStockMaterials,
-        recentActivities: [],
-        topUsedMaterials: [],
-        totalInvoices: 0,
-        totalInvoiceAmount: 0,
-        todayUsageCost: 0,
-        weeklySales: 0,
-        monthlySales: 0,
-        todayUsagesCount: 0,
-        activeSessions: 0,
-        statusSummary: { normal: 0, konsinye: 0, iade: 0, faturalı: 0 },
-        totalSessions: 0,
-        recentSessions: [],
-        quickCountSessions: 0,
-        todayCounts: 0,
-        pendingApprovals: 0
+        id: 'guest',
+        username: 'guest',
+        email: 'guest@example.com',
+        password: '',
+        name: 'Misafir Kullanıcı',
+        phone: '',
+        department: '',
+        role: 'user',
+        permissions: {
+          viewDashboard: true,
+          viewReports: true
+        },
+        avatarColor: '#4F46E5',
+        isActive: true,
+        lastLogin: null,
+        lastLoginIp: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  // ==================== AUTH ====================
+
+  async login(email: string, password: string): Promise<{ success: boolean; token?: string; user?: User; error?: string }> {
+    try {
+      console.log('🔐 Giriş yapılıyor:', email);
+      
+      // Özel login endpoint'i (token kontrolü yapmadan)
+      const url = `${API_BASE_URL}/auth/login`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Giriş yapılamadı');
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.token) {
+        // Token'ı kaydet
+        this.setToken(data.token);
+        
+        // User bilgisini localStorage'a kaydet
+        if (data.user) {
+          localStorage.setItem('user', JSON.stringify(data.user));
+        }
+        
+        console.log('✅ Giriş başarılı:', email);
+        return {
+          success: true,
+          token: data.token,
+          user: data.user
+        };
+      } else {
+        throw new Error(data.error || 'Giriş yapılamadı');
+      }
+      
+    } catch (error) {
+      console.error('❌ Giriş hatası:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Giriş yapılamadı'
+      };
+    }
+  }
+
+  async logout(): Promise<void> {
+    this.clearToken();
+    localStorage.removeItem('user');
+    console.log('👋 Çıkış yapıldı');
+  }
+
+  // ==================== HEALTH CHECK ====================
+
+  async healthCheck(): Promise<{
+    status: string;
+    database: string;
+    timestamp: string;
+    environment: string;
+    realtime: boolean;
+  }> {
+    try {
+      console.log('🏥 Health check yapılıyor...');
+      
+      const response = await fetch(`${API_BASE_URL}/health`);
+      const data = await response.json();
+      
+      console.log('✅ Health check sonucu:', data);
+      return {
+        status: data.status || 'ERROR',
+        database: data.database || 'Disconnected',
+        timestamp: data.timestamp || new Date().toISOString(),
+        environment: data.environment || 'unknown',
+        realtime: data.realtime || false
       };
     } catch (error) {
-      console.error('Dashboard istatistikleri hatası:', error);
-      return this.getEmptyDashboardStats();
+      console.error('❌ Health check failed:', error);
+      return {
+        status: 'ERROR',
+        database: 'Disconnected',
+        timestamp: new Date().toISOString(),
+        environment: 'unknown',
+        realtime: false
+      };
     }
   }
 
-  // ============ YARDIMCI METODLAR ============
-  private mapToDbField(field: string): string {
-    const mapping: Record<string, string> = {
-      // Users
-      'name': 'full_name',
-      'isActive': 'is_active',
-      'lastLogin': 'last_login',
-      'lastLoginIp': 'last_login_ip',
-      'avatarColor': 'avatar_color',
-      'sessionTimeout': 'session_timeout',
-      'canViewPages': 'can_view_pages',
-      'canEditPages': 'can_edit_pages',
-      'createdAt': 'created_at',
-      'updatedAt': 'updated_at',
+  // ==================== SYNC ====================
+
+  async getSyncTimestamp(): Promise<{ [key: string]: Date }> {
+    try {
+      const response = await this.request('/sync/timestamp');
       
-      // Materials
-      'udiCode': 'udi_code',
-      'allBarcode': 'all_barcode',
-      'intuitiveCode': 'intuitive_code',
-      'serialNumber': 'serial_number',
-      'subCategory': 'sub_category',
-      'unitPrice': 'unit_price',
-      'currentStock': 'current_stock',
-      'minStockLevel': 'min_stock_level',
-      'minStock': 'min_stock',
-      'expirationDate': 'expiration_date',
-      'serialNoStatus': 'serial_no_status',
-      'materialDescription': 'material_description',
-      'isActive': 'is_active',
-      'lastStockCountDate': 'last_stock_count_date',
-      'lastStockCountBy': 'last_stock_count_by',
-      'lastStockCountQuantity': 'last_stock_count_quantity'
-    };
-    
-    return mapping[field] || field;
+      if (response.success && response.timestamps) {
+        const timestamps: { [key: string]: Date } = {};
+        Object.entries(response.timestamps).forEach(([key, value]) => {
+          timestamps[key] = new Date(value as string);
+        });
+        return timestamps;
+      }
+      
+      return {
+        materials: new Date(0),
+        patients: new Date(0),
+        categories: new Date(0),
+        suppliers: new Date(0),
+        server: new Date()
+      };
+    } catch (error) {
+      console.error('❌ Sync timestamp alınamadı:', error);
+      return {
+        materials: new Date(0),
+        patients: new Date(0),
+        categories: new Date(0),
+        suppliers: new Date(0),
+        server: new Date()
+      };
+    }
   }
 
-  private mapUsersFromDB(dbUsers: any[]): User[] {
-    return dbUsers.map(dbUser => this.mapUserFromDB(dbUser));
+  // ==================== DASHBOARD ====================
+
+  async getDashboardStats(): Promise<any> {
+    try {
+      const response = await this.request('/dashboard/stats');
+      
+      if (response.success && response.data) {
+        return response.data;
+      }
+      
+      return {
+        totalMaterials: 0,
+        totalStockValue: 0,
+        criticalStockCount: 0,
+        totalPatients: 0,
+        activeSessions: 0,
+        statusSummary: {
+          normal: 0,
+          konsinye: 0,
+          iade: 0,
+          faturalı: 0
+        }
+      };
+    } catch (error) {
+      console.error('❌ Dashboard stats alınamadı:', error);
+      return {
+        totalMaterials: 0,
+        totalStockValue: 0,
+        criticalStockCount: 0,
+        totalPatients: 0,
+        activeSessions: 0,
+        statusSummary: {
+          normal: 0,
+          konsinye: 0,
+          iade: 0,
+          faturalı: 0
+        }
+      };
+    }
   }
 
-  private mapUserFromDB(dbUser: any): User {
-    return {
-      id: dbUser.id,
-      username: dbUser.username,
-      email: dbUser.email,
-      password: dbUser.password,
-      name: dbUser.full_name || dbUser.name,
-      department: dbUser.department,
-      role: dbUser.role as User['role'],
-      permissions: dbUser.permissions || {
-        createSession: false,
-        approveCounts: false,
-        manageMaterials: false,
-        managePatients: false,
-        manageInvoices: false,
-        bulkStatusChange: false,
-        quickCount: false,
-        exportData: false,
-        manageUsers: false,
-        manageSettings: false,
-        viewDashboard: true,
-        importExcel: false,
-        manageDailyPlan: false,
-        viewReports: false
-      },
-      isActive: dbUser.is_active,
-      lastLogin: dbUser.last_login,
-      lastLoginIp: dbUser.last_login_ip,
-      avatarColor: dbUser.avatar_color,
-      phone: dbUser.phone,
-      canViewPages: dbUser.can_view_pages || [],
-      canEditPages: dbUser.can_edit_pages || [],
-      sessionTimeout: dbUser.session_timeout,
-      createdAt: dbUser.created_at,
-      updatedAt: dbUser.updated_at
-    };
+  // ==================== LOGS ====================
+
+  async logAction(action: {
+    action: string;
+    module: string;
+    recordId: string;
+    details: string;
+    performedBy: string;
+  }): Promise<void> {
+    try {
+      // Log kaydını localStorage'a ekle
+      const logs = JSON.parse(localStorage.getItem('action_logs') || '[]');
+      logs.push({
+        ...action,
+        timestamp: new Date().toISOString(),
+        ipAddress: '',
+        userAgent: navigator.userAgent
+      });
+      
+      if (logs.length > 100) {
+        logs.splice(0, logs.length - 100);
+      }
+      
+      localStorage.setItem('action_logs', JSON.stringify(logs));
+      
+      console.log('📝 Action logged:', action);
+    } catch (error) {
+      console.error('❌ Log kaydedilemedi:', error);
+    }
   }
 
-  private mapMaterialsFromDB(dbMaterials: any[]): Material[] {
-    return dbMaterials.map(dbMaterial => this.mapMaterialFromDB(dbMaterial));
+  async getLogs(limit: number = 50): Promise<any[]> {
+    try {
+      const logs = JSON.parse(localStorage.getItem('action_logs') || '[]');
+      return logs.slice(-limit).reverse();
+    } catch (error) {
+      console.error('❌ Loglar getirilemedi:', error);
+      return [];
+    }
   }
 
-  private mapMaterialFromDB(dbMaterial: any): Material {
-    return {
-      id: dbMaterial.id,
-      name: dbMaterial.name,
-      barcode: dbMaterial.barcode,
-      gtin: dbMaterial.gtin,
-      sn: dbMaterial.sn,
-      udiCode: dbMaterial.udi_code,
-      allBarcode: dbMaterial.all_barcode,
-      intuitiveCode: dbMaterial.intuitive_code,
-      serialNumber: dbMaterial.serial_number,
-      category: dbMaterial.category,
-      subCategory: dbMaterial.sub_category,
-      unit: dbMaterial.unit,
-      unitPrice: parseFloat(dbMaterial.unit_price),
-      currentStock: parseInt(dbMaterial.current_stock),
-      minStockLevel: parseInt(dbMaterial.min_stock_level || dbMaterial.min_stock),
-      minStock: parseInt(dbMaterial.min_stock),
-      supplier: dbMaterial.supplier,
-      expirationDate: dbMaterial.expiration_date,
-      serialNoStatus: dbMaterial.serial_no_status,
-      materialDescription: dbMaterial.material_description,
-      location: dbMaterial.location,
-      isActive: dbMaterial.is_active,
-      status: dbMaterial.status as MaterialStatus,
-      createdAt: dbMaterial.created_at,
-      updatedAt: dbMaterial.updated_at,
-      lastStockCountDate: dbMaterial.last_stock_count_date,
-      lastStockCountBy: dbMaterial.last_stock_count_by,
-      lastStockCountQuantity: dbMaterial.last_stock_count_quantity,
-      isCritical: parseInt(dbMaterial.current_stock) <= parseInt(dbMaterial.min_stock)
-    };
-  }
+  // ==================== TEST CONNECTION ====================
 
-  private getEmptyDashboardStats(): DashboardStats {
-    return {
-      totalMaterials: 0,
-      totalPatients: 0,
-      totalStockValue: 0,
-      criticalStockCount: 0,
-      totalUsageCost: 0,
-      lowStockMaterials: [],
-      recentActivities: [],
-      topUsedMaterials: [],
-      totalInvoices: 0,
-      totalInvoiceAmount: 0,
-      todayUsageCost: 0,
-      weeklySales: 0,
-      monthlySales: 0,
-      todayUsagesCount: 0,
-      activeSessions: 0,
-      statusSummary: { normal: 0, konsinye: 0, iade: 0, faturalı: 0 },
-      totalSessions: 0,
-      recentSessions: [],
-      quickCountSessions: 0,
-      todayCounts: 0,
-      pendingApprovals: 0
-    };
-  }
-
-  // ============ BAĞLANTI TESTİ ============
   async testConnection(): Promise<boolean> {
     try {
-      await pool.query('SELECT NOW()');
-      console.log('✅ Neon SQL bağlantısı başarılı!');
-      return true;
+      console.log('🔗 PostgreSQL bağlantısı test ediliyor...');
+      
+      const health = await this.healthCheck();
+      
+      if (health.status === 'OK' && health.database === 'Connected') {
+        console.log('✅ PostgreSQL bağlantısı başarılı!');
+        return true;
+      } else {
+        console.error('❌ PostgreSQL bağlantısı başarısız:', health);
+        return false;
+      }
     } catch (error) {
-      console.error('❌ Neon SQL bağlantı hatası:', error);
+      console.error('❌ Bağlantı testi başarısız:', error);
       return false;
     }
   }
 
-  // ============ SİSTEM TEMİZLEME ============
-  async clearAllData(): Promise<void> {
+  // ==================== INITIALIZE ====================
+
+  async initialize(): Promise<boolean> {
     try {
-      await pool.query('TRUNCATE TABLE materials, users, patients, invoices, categories RESTART IDENTITY CASCADE');
-      console.log('✅ Tüm veriler temizlendi');
+      console.log('🚀 PostgreSQL servisi başlatılıyor...');
+      
+      // Önce bağlantıyı test et
+      const connected = await this.testConnection();
+      
+      if (!connected) {
+        console.error('❌ PostgreSQL bağlantısı kurulamadı!');
+        return false;
+      }
+      
+      // Token kontrolü yap
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.warn('⚠️ Token bulunamadı. Lütfen giriş yapın.');
+        return false;
+      }
+      
+      // Mevcut kullanıcıyı al
+      await this.getCurrentUser();
+      
+      console.log('✅ PostgreSQL servisi başarıyla başlatıldı');
+      return true;
+      
     } catch (error) {
-      console.error('❌ Veri temizleme hatası:', error);
+      console.error('❌ Servis başlatılamadı:', error);
+      return false;
     }
   }
 }
 
-// Singleton instance
-export const dataServiceSQL = new DataServiceSQL();
+export const dataServiceSQL = DataServiceSQL.getInstance();

@@ -1,4 +1,4 @@
-// src/components/Layout.tsx - GÜNCELLENMİŞ VERSİYON (Yetkilere göre menü)
+// src/components/Layout.tsx - POSTGRESQL GÜNCELLEMESİ
 import React, { ReactNode, useState, useEffect, useCallback } from 'react';
 import { 
   Home as AnaSayfaIcon,
@@ -19,23 +19,65 @@ import {
   UserCheck,
   Clock,
   Power,
-  Settings,
   Shield,
   Activity,
   Eye as Hospital,
   Stethoscope,
   Calendar,
-  Utensils
+  Database,
+  Wifi,
+  WifiOff,
+  RefreshCw
 } from 'lucide-react';
-import { dataService } from '../utils/dataService';
 import { DashboardStats, User as UserType, MaterialStatus, SystemLog } from '../types';
-import { useAuth } from '../components/AuthContext.tsx';
+import { useAuth } from '../components/AuthContext';
+import { dataServiceSQL } from '../utils/dataServiceSQL';
 
 interface LayoutProps {
   currentPage: string;
   onPageChange: (page: string) => void;
   children: ReactNode;
+  dbStatus?: {
+    connected: boolean;
+    message: string;
+  };
 }
+
+// Database Status Badge Component
+const DatabaseStatusBadge: React.FC<{
+  isConnected: boolean;
+  message: string;
+  onRefresh?: () => void;
+}> = ({ isConnected, message, onRefresh }) => {
+  return (
+    <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+      isConnected 
+        ? 'bg-green-100 text-green-800 border border-green-200' 
+        : 'bg-red-100 text-red-800 border border-red-200'
+    }`}>
+      {isConnected ? (
+        <>
+          <Wifi className="h-3.5 w-3.5" />
+          <span>PostgreSQL: Aktif</span>
+        </>
+      ) : (
+        <>
+          <WifiOff className="h-3.5 w-3.5" />
+          <span>PostgreSQL: Bağlantı Yok</span>
+        </>
+      )}
+      {onRefresh && (
+        <button
+          onClick={onRefresh}
+          className="ml-1 p-1 hover:opacity-80 transition-opacity"
+          title="Bağlantıyı yenile"
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+};
 
 // Statü kartı component'ı
 const StatusCard: React.FC<{
@@ -110,7 +152,11 @@ const StatusCard: React.FC<{
 const SideMenu: React.FC<{
   currentPage: string;
   onPageChange: (page: string) => void;
-}> = ({ currentPage, onPageChange }) => {
+  dbStatus?: {
+    connected: boolean;
+    message: string;
+  };
+}> = ({ currentPage, onPageChange, dbStatus }) => {
   const [showUserSection, setShowUserSection] = useState(false);
   const { user, canViewPage, getRoleDisplayName } = useAuth();
   
@@ -132,10 +178,6 @@ const SideMenu: React.FC<{
     canViewPage(item.id)
   );
 
-  // Son Aktiviteler - Sadece Admin ve Yönetici için
-  const recentActivities = dataService.getLogs().slice(0, 5);
-  const canViewActivities = user?.role === 'admin' || user?.role === 'manager';
-
   return (
     <div className="h-full flex flex-col bg-gradient-to-b from-[#0F1B5D] to-[#1E3A8A] text-white">
       {/* Logo ve Hastane Adı */}
@@ -149,9 +191,19 @@ const SideMenu: React.FC<{
           </div>
           <div>
             <h1 className="text-xl font-bold text-white">Osmangazi Göz</h1>
-            <p className="text-orange-400 text-sm">Stok Takip Sistemi</p>
+            <p className="text-orange-400 text-sm">PostgreSQL Stok Sistemi</p>
           </div>
         </div>
+
+        {/* Database Status */}
+        {dbStatus && (
+          <div className="mt-4">
+            <DatabaseStatusBadge 
+              isConnected={dbStatus.connected} 
+              message={dbStatus.message}
+            />
+          </div>
+        )}
       </div>
 
       {/* Kullanıcı Bilgileri */}
@@ -163,6 +215,9 @@ const SideMenu: React.FC<{
           <div className="flex-1">
             <p className="font-semibold text-white">{user?.name}</p>
             <p className="text-sm text-orange-300">{getRoleDisplayName()}</p>
+            <p className="text-xs text-blue-300 mt-1">
+              {user?.email}
+            </p>
           </div>
           <button 
             onClick={() => setShowUserSection(!showUserSection)}
@@ -182,8 +237,10 @@ const SideMenu: React.FC<{
               <span className="font-medium text-white">{user?.department}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-blue-300">Email:</span>
-              <span className="font-medium text-white">{user?.email}</span>
+              <span className="text-blue-300">Kaynak:</span>
+              <span className="font-medium text-white">
+                {user?.id?.startsWith('user-') ? 'Local' : 'PostgreSQL'}
+              </span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-blue-300">Yetkiler:</span>
@@ -230,32 +287,11 @@ const SideMenu: React.FC<{
           ))}
         </div>
       </div>
-
-      {/* Son Aktiviteler - Sadece Admin ve Yönetici için */}
-      {canViewActivities && (
-        <div className="p-4 border-t border-blue-800">
-          <h3 className="font-semibold text-orange-400 mb-3 flex items-center">
-            <Clock className="h-4 w-4 mr-2" />
-            Son Aktiviteler
-          </h3>
-          <div className="space-y-2 max-h-40 overflow-y-auto">
-            {recentActivities.map((log: SystemLog, index) => (
-              <div key={index} className="bg-blue-900/20 rounded-lg p-2">
-                <p className="text-xs font-medium text-white">{log.performedBy}</p>
-                <p className="text-xs text-blue-200 truncate">{log.details}</p>
-                <p className="text-xs text-blue-400 text-right">
-                  {log.performedAt ? new Date(log.performedAt).toLocaleTimeString('tr-TR') : ''}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
-export default function Layout({ children, currentPage, onPageChange }: LayoutProps) {
+export default function Layout({ children, currentPage, onPageChange, dbStatus }: LayoutProps) {
   const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
     totalMaterials: 0,
     totalPatients: 0,
@@ -319,81 +355,57 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
     return () => clearInterval(interval);
   }, []);
 
-  const loadDashboardStats = useCallback(() => {
-    const stats = dataService.getDashboardStats();
-    setDashboardStats(stats);
-  }, []);
+  const loadDashboardStats = useCallback(async () => {
+    try {
+      if (dbStatus?.connected) {
+        const stats = await dataServiceSQL.getDashboardStats();
+        setDashboardStats(stats);
+      }
+    } catch (error) {
+      console.error('❌ Dashboard stats yüklenemedi:', error);
+    }
+  }, [dbStatus]);
 
-  const loadNotifications = useCallback(() => {
-    const criticalMaterials = dataService.getLowStockMaterials();
-    const expiredMaterials = dataService.getExpiredMaterials();
-    const expiringSoonMaterials = dataService.getExpiringSoonMaterials(7);
-    const recentSessions = dataService.getStockCountSessions()
-      .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())
-      .slice(0, 5);
+  const loadNotifications = useCallback(async () => {
+    try {
+      const newNotifications: any[] = [];
 
-    const newNotifications: any[] = [];
+      // PostgreSQL bağlantı durumu bildirimi
+      if (dbStatus) {
+        if (dbStatus.connected) {
+          newNotifications.push({
+            id: `db-connected-${Date.now()}`,
+            type: 'success',
+            title: '✅ PostgreSQL Bağlantısı Aktif',
+            message: 'PostgreSQL veritabanına başarıyla bağlanıldı',
+            time: 'Şimdi',
+            read: false,
+            link: 'dashboard'
+          });
+        } else {
+          newNotifications.push({
+            id: `db-disconnected-${Date.now()}`,
+            type: 'error',
+            title: '❌ PostgreSQL Bağlantısı Yok',
+            message: 'PostgreSQL veritabanına bağlanılamıyor. Demo modunda çalışıyorsunuz.',
+            time: 'Şimdi',
+            read: false,
+            link: 'dashboard'
+          });
+        }
+      }
 
-    // Kritik stok bildirimleri
-    criticalMaterials.forEach(material => {
-      newNotifications.push({
-        id: `critical-${material.id}-${Date.now()}`,
-        type: 'warning',
-        title: '⚠️ Kritik Stok Uyarısı',
-        message: `${material.name} malzemesi kritik stok seviyesinde (${material.currentStock} ${material.unit})`,
-        time: 'Şimdi',
-        read: false,
-        link: 'materials'
-      });
-    });
+      // Eski okunmuş bildirimleri koru
+      const existingReadNotifications = notifications.filter(n => n.read);
+      const allNotifications = [...newNotifications, ...existingReadNotifications]
+        .sort((a, b) => b.time.localeCompare(a.time))
+        .slice(0, 20);
 
-    // Son kullanma tarihi geçmiş malzemeler
-    expiredMaterials.forEach(material => {
-      newNotifications.push({
-        id: `expired-${material.id}-${Date.now()}`,
-        type: 'error',
-        title: '⏰ Son Kullanma Tarihi Geçmiş',
-        message: `${material.name} malzemesinin son kullanma tarihi geçmiş (${material.expirationDate})`,
-        time: 'Şimdi',
-        read: false,
-        link: 'materials'
-      });
-    });
-
-    // Yakında bitecek malzemeler
-    expiringSoonMaterials.forEach(material => {
-      newNotifications.push({
-        id: `expiring-${material.id}-${Date.now()}`,
-        type: 'warning',
-        title: '📅 Yakında Bitecek',
-        message: `${material.name} malzemesinin son kullanma tarihi yaklaşıyor (${material.expirationDate})`,
-        time: 'Şimdi',
-        read: false,
-        link: 'materials'
-      });
-    });
-
-    // Yeni sayım oturumları
-    recentSessions.forEach(session => {
-      newNotifications.push({
-        id: `session-${session.id}-${Date.now()}`,
-        type: 'info',
-        title: '📋 Yeni Sayım Oturumu',
-        message: `${session.sessionNo} - ${session.invoiceNo} oturumu oluşturuldu`,
-        time: session.createdAt ? new Date(session.createdAt).toLocaleDateString('tr-TR') : '',
-        read: false,
-        link: 'stock-count'
-      });
-    });
-
-    // Eski okunmuş bildirimleri koru
-    const existingReadNotifications = notifications.filter(n => n.read);
-    const allNotifications = [...newNotifications, ...existingReadNotifications]
-      .sort((a, b) => b.time.localeCompare(a.time))
-      .slice(0, 20);
-
-    setNotifications(allNotifications);
-  }, [notifications]);
+      setNotifications(allNotifications);
+    } catch (error) {
+      console.error('❌ Bildirimler yüklenemedi:', error);
+    }
+  }, [dbStatus, notifications]);
 
   const hasCriticalStock = dashboardStats.criticalStockCount > 0;
   const unreadNotifications = notifications.filter(n => !n.read).length;
@@ -418,6 +430,22 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
     return dashboardStats.statusSummary?.[status] || 0;
   };
 
+  const refreshDatabaseConnection = async () => {
+    try {
+      const healthCheck = await dataServiceSQL.healthCheck();
+      const isConnected = healthCheck.status === 'OK' && healthCheck.database === 'Connected';
+      
+      // dbStatus prop'u varsa güncellemek için parent component'e event gönder
+      console.log('🔗 PostgreSQL bağlantısı yenilendi:', isConnected);
+      
+      if (isConnected) {
+        loadDashboardStats();
+      }
+    } catch (error) {
+      console.error('❌ Bağlantı yenileme hatası:', error);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white text-gray-900 flex">
       {/* Sabit Sol Menü - Desktop */}
@@ -425,6 +453,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
         <SideMenu 
           currentPage={currentPage}
           onPageChange={onPageChange}
+          dbStatus={dbStatus}
         />
       </div>
 
@@ -455,7 +484,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                   </div>
                   <div>
                     <h1 className="text-lg font-bold text-white">Osmangazi Göz</h1>
-                    <p className="text-orange-400 text-xs">Stok Takip Sistemi</p>
+                    <p className="text-orange-400 text-xs">PostgreSQL Stok Sistemi</p>
                   </div>
                 </div>
               </div>
@@ -464,15 +493,15 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
               <div className="hidden lg:flex flex-1 justify-center">
                 <div className="bg-blue-800/50 backdrop-blur-sm px-6 py-2 rounded-full border border-blue-700/50">
                   <h2 className="text-lg font-semibold text-white text-center">
-                    {currentPage === 'dashboard' && 'Anasayfa'}
-                    {currentPage === 'materials' && 'Malzeme Yönetimi'}
-                    {currentPage === 'stock-count' && 'Stok Takip'}
-                    {currentPage === 'patients' && 'Hasta Yönetimi'}
-                    {currentPage === 'invoices' && 'Fatura Yönetimi'}
-                    {currentPage === 'reports' && 'Raporlar'}
-                    {currentPage === 'users' && 'Kullanıcı Yönetimi'}
-                    {currentPage === 'doctors' && 'Doktorlar'}
-                    {currentPage === 'daily-plan' && 'Günlük Plan'}
+                    {currentPage === 'dashboard' && 'PostgreSQL Anasayfa'}
+                    {currentPage === 'materials' && 'PostgreSQL Malzeme Yönetimi'}
+                    {currentPage === 'stock-count' && 'PostgreSQL Stok Takip'}
+                    {currentPage === 'patients' && 'PostgreSQL Hasta Yönetimi'}
+                    {currentPage === 'invoices' && 'PostgreSQL Fatura Yönetimi'}
+                    {currentPage === 'reports' && 'PostgreSQL Raporlar'}
+                    {currentPage === 'users' && 'PostgreSQL Kullanıcı Yönetimi'}
+                    {currentPage === 'doctors' && 'PostgreSQL Doktorlar'}
+                    {currentPage === 'daily-plan' && 'PostgreSQL Günlük Plan'}
                   </h2>
                 </div>
               </div>
@@ -483,16 +512,27 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                 <div className="lg:hidden text-center">
                   <h2 className="text-sm font-semibold text-white">
                     {currentPage === 'dashboard' && 'Anasayfa'}
-                    {currentPage === 'materials' && 'Malzeme'}
-                    {currentPage === 'stock-count' && 'Stok'}
-                    {currentPage === 'patients' && 'Hasta'}
-                    {currentPage === 'invoices' && 'Fatura'}
-                    {currentPage === 'reports' && 'Raporlar'}
-                    {currentPage === 'users' && 'Kullanıcılar'}
-                    {currentPage === 'doctors' && 'Doktorlar'}
-                    {currentPage === 'daily-plan' && 'Günlük Plan'}
+                    {currentPage === 'materials' && 'PostgreSQL Malzeme'}
+                    {currentPage === 'stock-count' && 'PostgreSQL Stok'}
+                    {currentPage === 'patients' && 'PostgreSQL Hasta'}
+                    {currentPage === 'invoices' && 'PostgreSQL Fatura'}
+                    {currentPage === 'reports' && 'PostgreSQL Raporlar'}
+                    {currentPage === 'users' && 'PostgreSQL Kullanıcılar'}
+                    {currentPage === 'doctors' && 'PostgreSQL Doktorlar'}
+                    {currentPage === 'daily-plan' && 'PostgreSQL Günlük Plan'}
                   </h2>
                 </div>
+                
+                {/* Database Status Badge */}
+                {dbStatus && (
+                  <div className="hidden lg:block">
+                    <DatabaseStatusBadge 
+                      isConnected={dbStatus.connected} 
+                      message={dbStatus.message}
+                      onRefresh={refreshDatabaseConnection}
+                    />
+                  </div>
+                )}
                 
                 {/* Bildirimler */}
                 <div className="relative">
@@ -591,7 +631,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                         <button
                           onClick={() => {
                             setShowNotifications(false);
-                            onPageChange('reports');
+                            onPageChange('dashboard');
                           }}
                           className="w-full text-center font-medium text-orange-600 hover:text-orange-700 py-2 rounded-lg hover:bg-gray-50 transition-colors"
                         >
@@ -644,7 +684,17 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                           className="w-full px-4 py-2 text-left text-gray-700 hover:text-gray-900 hover:bg-gray-50 transition-colors flex items-center space-x-3"
                         >
                           <AnaSayfaIcon className="h-4 w-4 text-gray-500" />
-                          <span>Anasayfa</span>
+                          <span>PostgreSQL Anasayfa</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowUserMenu(false);
+                            refreshDatabaseConnection();
+                          }}
+                          className="w-full px-4 py-2 text-left text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors flex items-center space-x-3"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                          <span>Bağlantıyı Yenile</span>
                         </button>
                         <div className="border-t border-gray-200 my-2"></div>
                         <button
@@ -677,6 +727,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                   onPageChange(page);
                   setShowMobileMenu(false);
                 }}
+                dbStatus={dbStatus}
               />
             </div>
           </div>
@@ -704,7 +755,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                 </div>
                 Osmangazi Göz Hastanesi
               </h3>
-              <p className="text-orange-400 text-xs">Stok Takip Sistemi v3.0</p>
+              <p className="text-orange-400 text-xs">PostgreSQL Stok Takip Sistemi v3.0</p>
               <div className="mt-1 flex items-center space-x-2">
                 <span className="px-2 py-0.5 bg-blue-800/50 text-orange-300 text-xs rounded-full">
                   Kullanıcı: {user?.name}
@@ -712,6 +763,15 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                 <span className="px-2 py-0.5 bg-orange-900/50 text-orange-300 text-xs rounded-full capitalize">
                   Rol: {getRoleDisplayName()}
                 </span>
+                {dbStatus && (
+                  <span className={`px-2 py-0.5 text-xs rounded-full ${
+                    dbStatus.connected 
+                      ? 'bg-green-900/50 text-green-300' 
+                      : 'bg-red-900/50 text-red-300'
+                  }`}>
+                    {dbStatus.connected ? 'PostgreSQL: Aktif' : 'PostgreSQL: Bağlantı Yok'}
+                  </span>
+                )}
               </div>
             </div>
             
@@ -727,7 +787,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                   <span className="text-xs text-blue-300">Kritik: <span className="font-bold text-white">{dashboardStats.criticalStockCount}</span></span>
                 </div>
                 <div className="flex items-center space-x-1">
-                  <Search className="h-3 w-3 text-green-400" />
+                  <Database className="h-3 w-3 text-green-400" />
                   <span className="text-xs text-blue-300">Değer: <span className="font-bold text-white">₺{dashboardStats.totalStockValue.toLocaleString('tr-TR')}</span></span>
                 </div>
               </div>

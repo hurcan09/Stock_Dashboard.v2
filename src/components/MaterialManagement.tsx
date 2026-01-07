@@ -8,231 +8,542 @@ import {
   RefreshCw, Save, Star, Shield, Lock, Unlock,
   BarChart3, TrendingUp, TrendingDown, PackageOpen,
   Layers, Grid3X3, List, Grid, Menu, MoreHorizontal,
-  ArrowUp, ArrowDown, UserPlus, Users, Building
+  ArrowUp, ArrowDown, UserPlus, Users, Building,
+  Database, Wifi, WifiOff, CheckCircle, XCircle
 } from 'lucide-react';
 import { Material, Category, Supplier, StockCount, StockCountSession, MaterialStatus } from '../types';
 import { dataService } from '../utils/dataService';
 import { dataServiceSQL } from '../utils/dataServiceSQL';
 
-// API servisi - Tüm tarayıcılarda veri senkronizasyonu için
-const API_BASE_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:10000/api'
-  : '/api'; // Production'da aynı domain
+// ✅ GÜNCELLENMİŞ API SERVİSİ - PostgreSQL için optimize edilmiş
+const API_BASE_URL = 'http://localhost:10000';
 
 const apiService = {
-  // Malzemeleri getir
+  // ✅ PostgreSQL bağlantı durumunu kontrol et
+  async checkConnection(): Promise<{ connected: boolean; message: string }> {
+    try {
+      console.log('🔗 PostgreSQL bağlantısı kontrol ediliyor...');
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        return { connected: false, message: '❌ Token bulunamadı. Lütfen giriş yapın.' };
+      }
+      
+      const response = await fetch(`${API_BASE_URL}/api/health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ PostgreSQL bağlantı durumu:', data);
+        return { 
+          connected: data.status === 'OK' && data.database === 'Connected', 
+          message: data.status === 'OK' ? '✅ PostgreSQL bağlantısı aktif' : '❌ PostgreSQL bağlantı sorunu'
+        };
+      }
+      
+      return { connected: false, message: '❌ Sunucuya bağlanılamıyor' };
+      
+    } catch (error) {
+      console.error('❌ PostgreSQL bağlantı kontrolü başarısız:', error);
+      return { 
+        connected: false, 
+        message: '❌ Sunucuya bağlanılamıyor. Lütfen npm run server komutunu çalıştırın.' 
+      };
+    }
+  },
+
+  // ✅ Malzemeleri getir - PostgreSQL'DEN
   async getMaterials(): Promise<Material[]> {
     try {
-      const response = await fetch(`${API_BASE_URL}/materials`);
-      if (!response.ok) throw new Error('API hatası');
-      return await response.json();
-    } catch (error) {
-      console.error('Malzemeler getirilemedi, dataService kullanılıyor:', error);
-      // Fallback: dataService'dan al
-      return dataService.getMaterials();
-    }
-  },
+      console.log('📡 PostgreSQL veritabanından malzemeler yükleniyor...');
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        console.warn('⚠️ Token bulunamadı. Boş dizi döndürülüyor.');
+        return [];
+      }
 
-  // Malzeme ekle
-  async addMaterial(material: Omit<Material, 'id' | 'createdAt' | 'updatedAt'>): Promise<Material> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/materials`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(material)
+      const response = await fetch(`${API_BASE_URL}/api/materials`, {
+        method: 'GET',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ API hatası:', response.status, errorText);
+        throw new Error(`API hatası: ${response.status}`);
+      }
+      
       const result = await response.json();
       
-      // dataService'a da ekle (kalıcı depolama için)
-      const newMaterial = { 
-        ...material, 
-        id: result.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      dataService.saveMaterial(material);
-      
-      return newMaterial;
+      if (result.success && result.data) {
+        console.log(`✅ ${result.data.length} malzeme PostgreSQL'den başarıyla yüklendi`);
+        
+        // Verileri Material tipine dönüştür
+        const materials: Material[] = result.data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          barcode: item.barcode,
+          gtin: item.gtin || '',
+          sn: item.sn || '',
+          udiCode: item.udiCode || '',
+          allBarcode: item.allBarcode || '',
+          intuitiveCode: item.intuitiveCode || '',
+          category: item.category || '',
+          subCategory: item.subCategory || '',
+          unit: item.unit || 'adet',
+          unitPrice: parseFloat(item.unitPrice) || 0,
+          currentStock: parseInt(item.currentStock) || 0,
+          minStock: parseInt(item.minStock) || 0,
+          supplier: item.supplier || '',
+          expirationDate: item.expirationDate || '',
+          serialNoStatus: item.serialNoStatus || '',
+          materialDescription: item.materialDescription || '',
+          status: (item.status || 'normal') as MaterialStatus,
+          createdBy: item.createdBy,
+          updatedBy: item.updatedBy,
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        
+        return materials;
+      } else {
+        console.warn('⚠️ Veri formatı beklenenden farklı:', result);
+        return result.data || result || [];
+      }
     } catch (error) {
-      console.error('Malzeme eklenemedi, dataService kullanılıyor:', error);
-      // Fallback: dataService'a ekle
-      const newMaterial = { 
-        ...material, 
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      dataService.saveMaterial(material);
-      return newMaterial;
+      console.error('❌ PostgreSQL veritabanından malzemeler getirilemedi:', error);
+      
+      if (error instanceof Error && error.message.includes('Failed to fetch')) {
+        alert('Sunucuya bağlanılamıyor. Lütfen "npm run server" komutunu çalıştırdığınızdan emin olun.');
+      }
+      
+      return [];
     }
   },
 
-  // Malzeme güncelle
+  // ✅ Yeni malzeme ekle - PostgreSQL'e kaydet
+  async addMaterial(material: Omit<Material, 'id' | 'createdAt' | 'updatedAt'>): Promise<Material> {
+    try {
+      console.log('📤 PostgreSQL veritabanına malzeme ekleniyor...');
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Token bulunamadı. Lütfen giriş yapın.');
+      }
+
+      // PostgreSQL formatına dönüştür
+      const postgresMaterial = {
+        name: material.name,
+        barcode: material.barcode,
+        gtin: material.gtin || '',
+        sn: material.sn || '',
+        udiCode: material.udiCode || '',
+        allBarcode: material.allBarcode || '',
+        intuitiveCode: material.intuitiveCode || '',
+        category: material.category || '',
+        subCategory: material.subCategory || '',
+        unit: material.unit || 'adet',
+        unitPrice: material.unitPrice || 0,
+        currentStock: material.currentStock || 0,
+        minStock: material.minStock || 0,
+        supplier: material.supplier || '',
+        expirationDate: material.expirationDate || '',
+        serialNoStatus: material.serialNoStatus || '',
+        materialDescription: material.materialDescription || '',
+        status: material.status || 'normal'
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/materials`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(postgresMaterial)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Malzeme eklenemedi:', response.status, errorText);
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          throw new Error(errorJson.error || 'Malzeme eklenemedi');
+        } catch {
+          throw new Error(`Malzeme eklenemedi: ${response.status}`);
+        }
+      }
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Malzeme eklenemedi');
+      }
+      
+      console.log('✅ Malzeme PostgreSQL veritabanına başarıyla eklendi:', result);
+      
+      const newMaterial: Material = { 
+        ...material, 
+        id: result.data?.id || Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isActive: true
+      };
+      
+      return newMaterial;
+    } catch (error) {
+      console.error('❌ PostgreSQL veritabanına malzeme eklenemedi:', error);
+      throw error;
+    }
+  },
+
+  // ✅ Malzeme güncelle - PostgreSQL'e kaydet
   async updateMaterial(id: string, updates: Partial<Material>): Promise<void> {
     try {
-      await fetch(`${API_BASE_URL}/materials/${id}`, {
+      console.log('✏️ PostgreSQL veritabanında malzeme güncelleniyor...');
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Token bulunamadı. Lütfen giriş yapın.');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/materials/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(updates)
       });
       
-      // dataService'ı da güncelle
-      dataService.updateMaterial(id, updates);
-    } catch (error) {
-      console.error('Malzeme güncellenemedi, dataService kullanılıyor:', error);
-      // Fallback: dataService'ı güncelle
-      dataService.updateMaterial(id, updates);
-    }
-  },
-
-  // Malzeme sil
-  async deleteMaterial(id: string): Promise<void> {
-    try {
-      await fetch(`${API_BASE_URL}/materials/${id}`, {
-        method: 'DELETE'
-      });
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
       
-      // dataService'dan da sil
-      dataService.deleteMaterial(id);
-    } catch (error) {
-      console.error('Malzeme silinemedi, dataService kullanılıyor:', error);
-      // Fallback: dataService'dan sil
-      dataService.deleteMaterial(id);
-    }
-  },
-
-  // Kullanıcıları getir
-  async getUsers() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/users`);
-      if (!response.ok) throw new Error('API hatası');
-      return await response.json();
-    } catch (error) {
-      console.error('Kullanıcılar getirilemedi:', error);
-      return dataService.getUsers();
-    }
-  },
-
-  // Tedarikçileri getir
-  async getSuppliers(): Promise<Supplier[]> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/suppliers`);
-      if (!response.ok) throw new Error('API hatası');
-      return await response.json();
-    } catch (error) {
-      console.error('Tedarikçiler getirilemedi, dataService kullanılıyor:', error);
-      return dataService.getSuppliers();
-    }
-  },
-
-  // Tedarikçi ekle
-  async addSupplier(supplier: Omit<Supplier, 'id'>): Promise<Supplier> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/suppliers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(supplier)
-      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Malzeme güncellenemedi:', response.status, errorText);
+        throw new Error('Malzeme güncellenemedi');
+      }
+      
       const result = await response.json();
       
-      // dataService'a da ekle
-      const newSupplier = {
+      if (!result.success) {
+        throw new Error(result.error || 'Malzeme güncellenemedi');
+      }
+      
+      console.log('✅ Malzeme PostgreSQL veritabanında başarıyla güncellendi');
+    } catch (error) {
+      console.error('❌ PostgreSQL veritabanında malzeme güncellenemedi:', error);
+      throw error;
+    }
+  },
+
+  // ✅ Malzeme sil - PostgreSQL'den sil
+  async deleteMaterial(id: string): Promise<void> {
+    try {
+      console.log('🗑️ PostgreSQL veritabanından malzeme siliniyor...');
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Token bulunamadı. Lütfen giriş yapın.');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/materials/${id}`, {
+        method: 'DELETE',
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Malzeme silinemedi:', response.status, errorText);
+        throw new Error('Malzeme silinemedi');
+      }
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Malzeme silinemedi');
+      }
+      
+      console.log('✅ Malzeme PostgreSQL veritabanından başarıyla silindi');
+    } catch (error) {
+      console.error('❌ PostgreSQL veritabanından malzeme silinemedi:', error);
+      throw error;
+    }
+  },
+
+  // ✅ Kategorileri getir
+  async getCategories(): Promise<Category[]> {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        return [];
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/categories`, {
+        method: 'GET',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        return [];
+      }
+      
+      if (!response.ok) {
+        console.error('Kategoriler getirilemedi:', response.status);
+        return [];
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        const categories: Category[] = result.data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          description: item.description || '',
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        return categories;
+      }
+      
+      return result.data || result || [];
+    } catch (error) {
+      console.error('Kategoriler getirilemedi:', error);
+      return [];
+    }
+  },
+
+  // ✅ Kategori ekle
+  async addCategory(category: Omit<Category, 'id'>): Promise<Category> {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Token bulunamadı. Lütfen giriş yapın.');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/categories`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(category)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Kategori eklenemedi');
+      }
+      
+      const result = await response.json();
+      
+      const newCategory: Category = {
+        ...category,
+        id: result.id || Date.now().toString(),
+        isActive: true
+      };
+      
+      return newCategory;
+    } catch (error) {
+      console.error('Kategori eklenemedi:', error);
+      throw error;
+    }
+  },
+
+  // ✅ Tedarikçileri getir
+  async getSuppliers(): Promise<Supplier[]> {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        return [];
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/suppliers`, {
+        method: 'GET',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        return [];
+      }
+      
+      if (!response.ok) {
+        console.error('Tedarikçiler getirilemedi:', response.status);
+        return [];
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        const suppliers: Supplier[] = result.data.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.name,
+          contactPerson: item.contactPerson || '',
+          email: item.email || '',
+          phone: item.phone || '',
+          address: item.address || '',
+          taxNumber: item.taxNumber || '',
+          taxOffice: item.taxOffice || '',
+          description: item.description || '',
+          isActive: item.isActive !== false,
+          createdAt: item.createdAt || new Date().toISOString(),
+          updatedAt: item.updatedAt || new Date().toISOString()
+        }));
+        return suppliers;
+      }
+      
+      return result.data || result || [];
+    } catch (error) {
+      console.error('Tedarikçiler getirilemedi:', error);
+      return [];
+    }
+  },
+
+  // ✅ Tedarikçi ekle
+  async addSupplier(supplier: Omit<Supplier, 'id'>): Promise<Supplier> {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Token bulunamadı. Lütfen giriş yapın.');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/suppliers`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(supplier)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Tedarikçi eklenemedi');
+      }
+      
+      const result = await response.json();
+      
+      const newSupplier: Supplier = {
         ...supplier,
         id: result.id || Date.now().toString(),
         isActive: true
       };
-      dataService.saveSupplier(supplier);
       
       return newSupplier;
     } catch (error) {
-      console.error('Tedarikçi eklenemedi, dataService kullanılıyor:', error);
-      // Fallback: dataService'a ekle
-      const newSupplier = {
-        ...supplier,
-        id: Date.now().toString(),
-        isActive: true
-      };
-      dataService.saveSupplier(supplier);
-      return newSupplier;
+      console.error('Tedarikçi eklenemedi:', error);
+      throw error;
     }
   },
 
-  // Tedarikçi güncelle
-  async updateSupplier(id: string, updates: Partial<Supplier>): Promise<void> {
+  // ✅ Toplu malzeme güncelleme
+  async bulkUpdateMaterials(materialIds: string[], updates: any): Promise<void> {
     try {
-      await fetch(`${API_BASE_URL}/suppliers/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
+      const token = localStorage.getItem('token');
       
-      // dataService'ı da güncelle
-      dataService.updateSupplier(id, updates);
-    } catch (error) {
-      console.error('Tedarikçi güncellenemedi, dataService kullanılıyor:', error);
-      dataService.updateSupplier(id, updates);
-    }
-  },
+      if (!token) {
+        throw new Error('Token bulunamadı. Lütfen giriş yapın.');
+      }
 
-  // Tedarikçi sil
-  async deleteSupplier(id: string): Promise<void> {
-    try {
-      await fetch(`${API_BASE_URL}/suppliers/${id}`, {
-        method: 'DELETE'
-      });
-      
-      // dataService'dan da sil
-      dataService.deleteSupplier(id);
-    } catch (error) {
-      console.error('Tedarikçi silinemedi, dataService kullanılıyor:', error);
-      dataService.deleteSupplier(id);
-    }
-  },
-
-  // Kategorileri getir
-  async getCategories(): Promise<Category[]> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/categories`);
-      if (!response.ok) throw new Error('API hatası');
-      return await response.json();
-    } catch (error) {
-      console.error('Kategoriler getirilemedi, dataService kullanılıyor:', error);
-      return dataService.getCategories();
-    }
-  },
-
-  // Kategori ekle
-  async addCategory(category: Omit<Category, 'id'>): Promise<Category> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/categories`, {
+      const response = await fetch(`${API_BASE_URL}/api/materials/bulk-update`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(category)
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ materialIds, updates })
       });
-      const result = await response.json();
       
-      // dataService'a da ekle
-      const newCategory = {
-        ...category,
-        id: result.id || Date.now().toString()
-      };
-      dataService.saveCategory(category);
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        throw new Error('Oturum süresi doldu.');
+      }
       
-      return newCategory;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Toplu güncelleme yapılamadı');
+      }
+      
+      console.log('✅ Toplu güncelleme başarıyla tamamlandı');
     } catch (error) {
-      console.error('Kategori eklenemedi, dataService kullanılıyor:', error);
-      // Fallback: dataService'a ekle
-      const newCategory = {
-        ...category,
-        id: Date.now().toString()
-      };
-      dataService.saveCategory(category);
-      return newCategory;
+      console.error('Toplu güncelleme yapılamadı:', error);
+      throw error;
     }
   }
 };
 
-// Tedarikçi Ekleme Modal Component'i
+// ✅ Tedarikçi Ekleme Modal Component'i
 function AddSupplierModal({ onSave, onClose }: { onSave: (supplier: Omit<Supplier, 'id'>) => void; onClose: () => void }) {
   const [formData, setFormData] = useState({
     name: '',
@@ -443,7 +754,7 @@ function AddSupplierModal({ onSave, onClose }: { onSave: (supplier: Omit<Supplie
   );
 }
 
-// Kategori Ekleme Modal Component'i
+// ✅ Kategori Ekleme Modal Component'i
 function AddCategoryModal({ onSave, onClose }: { onSave: (category: Omit<Category, 'id'>) => void; onClose: () => void }) {
   const [formData, setFormData] = useState({
     name: '',
@@ -550,7 +861,7 @@ function AddCategoryModal({ onSave, onClose }: { onSave: (category: Omit<Categor
   );
 }
 
-// Barkod tarama modal component'i
+// ✅ Barkod tarama modal component'i
 function BarcodeScannerModal({ onScan, onClose }: { onScan: (barcode: string) => void; onClose: () => void }) {
   const [scanning, setScanning] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
@@ -681,7 +992,7 @@ function BarcodeScannerModal({ onScan, onClose }: { onScan: (barcode: string) =>
   );
 }
 
-// Toplu Düzenleme Modal Component - Sistem Yöneticisi için
+// ✅ Toplu Düzenleme Modal Component
 function BulkEditModal({ 
   selectedMaterials, 
   onSave, 
@@ -730,13 +1041,10 @@ function BulkEditModal({
   };
 
   const parseValue = (field: string, value: string) => {
-    // Eğer field sayısal bir alansa parse et
     if (field === 'unitPrice' || field === 'currentStock' || field === 'minStock') {
       const parsed = parseFloat(value);
-      // Eğer integer değer ise parseInt, değilse parseFloat döndür
       return Number.isInteger(parsed) ? parseInt(value) : parsed;
     }
-    // Diğer alanlar için string değeri döndür
     return value;
   };
 
@@ -779,7 +1087,6 @@ function BulkEditModal({
           </div>
 
           <div className="space-y-6">
-            {/* Seçili Malzemeler Listesi */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <h4 className="font-semibold text-blue-800 mb-3 flex items-center">
                 <Package className="h-5 w-5 mr-2" />
@@ -806,7 +1113,6 @@ function BulkEditModal({
               </div>
             </div>
 
-            {/* Düzenleme Alanı */}
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <h4 className="font-semibold text-gray-800 mb-4">Düzenlemeleri Ekleyin</h4>
               
@@ -857,7 +1163,6 @@ function BulkEditModal({
                   </div>
                 </div>
 
-                {/* Eklenen Düzenlemeler */}
                 {edits.length > 0 && (
                   <div className="border-t pt-4">
                     <h5 className="font-semibold text-gray-700 mb-2">Eklenen Düzenlemeler:</h5>
@@ -888,7 +1193,6 @@ function BulkEditModal({
               </div>
             </div>
 
-            {/* Uyarı */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-start space-x-3">
                 <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
@@ -902,7 +1206,6 @@ function BulkEditModal({
               </div>
             </div>
 
-            {/* Butonlar */}
             <div className="flex space-x-3">
               <button
                 onClick={handleSubmit}
@@ -925,7 +1228,7 @@ function BulkEditModal({
   );
 }
 
-// Hızlı Düzenleme Modal Component
+// ✅ Hızlı Düzenleme Modal Component
 function QuickEditModal({ material, onSave, onClose }: { material: Material; onSave: (updates: Partial<Material>) => void; onClose: () => void }) {
   const [formData, setFormData] = useState({
     name: material.name,
@@ -958,9 +1261,21 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
   const [showAddSupplier, setShowAddSupplier] = useState(false);
 
   useEffect(() => {
-    setCategories(dataService.getCategories());
-    setSuppliers(dataService.getSuppliers());
+    loadCategoriesAndSuppliers();
   }, []);
+
+  const loadCategoriesAndSuppliers = async () => {
+    try {
+      const [cats, sups] = await Promise.all([
+        apiService.getCategories(),
+        apiService.getSuppliers()
+      ]);
+      setCategories(cats);
+      setSuppliers(sups);
+    } catch (error) {
+      console.error('Kategoriler ve tedarikçiler yüklenemedi:', error);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -968,38 +1283,48 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
     onClose();
   };
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     if (newCategory.trim()) {
-      const newCat: Omit<Category, 'id'> = {
-        name: newCategory.trim(),
-        description: '',
-        isActive: true,
-        createdAt: new Date().toISOString()
-      };
-      dataService.saveCategory(newCat);
-      setCategories(dataService.getCategories());
-      setFormData({ ...formData, category: newCategory.trim() });
-      setNewCategory('');
-      setShowAddCategory(false);
+      try {
+        const newCat: Omit<Category, 'id'> = {
+          name: newCategory.trim(),
+          description: '',
+          isActive: true,
+          createdAt: new Date().toISOString()
+        };
+        await apiService.addCategory(newCat);
+        await loadCategoriesAndSuppliers();
+        setFormData({ ...formData, category: newCategory.trim() });
+        setNewCategory('');
+        setShowAddCategory(false);
+      } catch (error) {
+        console.error('Kategori eklenemedi:', error);
+        alert('Kategori eklenirken hata oluştu!');
+      }
     }
   };
 
-  const handleAddSupplier = () => {
+  const handleAddSupplier = async () => {
     if (newSupplier.trim()) {
-      const newSup: Omit<Supplier, 'id'> = {
-        name: newSupplier.trim(),
-        contactPerson: '',
-        email: '',
-        phone: '',
-        address: '',
-        isActive: true,
-        createdAt: new Date().toISOString()
-      };
-      dataService.saveSupplier(newSup);
-      setSuppliers(dataService.getSuppliers());
-      setFormData({ ...formData, supplier: newSupplier.trim() });
-      setNewSupplier('');
-      setShowAddSupplier(false);
+      try {
+        const newSup: Omit<Supplier, 'id'> = {
+          name: newSupplier.trim(),
+          contactPerson: '',
+          email: '',
+          phone: '',
+          address: '',
+          isActive: true,
+          createdAt: new Date().toISOString()
+        };
+        await apiService.addSupplier(newSup);
+        await loadCategoriesAndSuppliers();
+        setFormData({ ...formData, supplier: newSupplier.trim() });
+        setNewSupplier('');
+        setShowAddSupplier(false);
+      } catch (error) {
+        console.error('Tedarikçi eklenemedi:', error);
+        alert('Tedarikçi eklenirken hata oluştu!');
+      }
     }
   };
 
@@ -1015,7 +1340,6 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* İlk Satır */}
             <div className="grid grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1068,7 +1392,6 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
               </div>
             </div>
 
-            {/* İkinci Satır */}
             <div className="grid grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1122,7 +1445,6 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
               </div>
             </div>
 
-            {/* Üçüncü Satır */}
             <div className="grid grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1262,7 +1584,6 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
               </div>
             </div>
 
-            {/* Dördüncü Satır */}
             <div className="grid grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1317,7 +1638,6 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
               </div>
             </div>
 
-            {/* Beşinci Satır */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1366,7 +1686,7 @@ function QuickEditModal({ material, onSave, onClose }: { material: Material; onS
   );
 }
 
-// Malzeme Detay Modal Component
+// ✅ Malzeme Detay Modal Component
 function MaterialDetailsModal({ material, onClose }: { material: Material; onClose: () => void }) {
   const [stockCounts, setStockCounts] = useState<StockCount[]>([]);
   const [sessions, setSessions] = useState<StockCountSession[]>([]);
@@ -1682,7 +2002,7 @@ function MaterialDetailsModal({ material, onClose }: { material: Material; onClo
   );
 }
 
-// Excel Import Modal Component
+// ✅ Excel Import Modal Component
 function ExcelImportModal({ onImport, onClose }: { onImport: (materials: any[]) => void; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [importProgress, setImportProgress] = useState(0);
@@ -1997,7 +2317,7 @@ function ExcelImportModal({ onImport, onClose }: { onImport: (materials: any[]) 
   );
 }
 
-// Statü Değiştirme Modal Component
+// ✅ Statü Değiştirme Modal Component
 function StatusChangeModal({ 
   selectedMaterials, 
   onStatusChange, 
@@ -2085,7 +2405,7 @@ function StatusChangeModal({
   );
 }
 
-// GÜNCELLENMİŞ Malzeme Modal Component
+// ✅ GÜNCELLENMİŞ Malzeme Modal Component
 interface MaterialModalProps {
   material?: Material | null;
   categories: Category[];
@@ -2139,7 +2459,6 @@ function MaterialModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Zorunlu alanları kontrol et
     if (!formData.name.trim()) {
       alert('Lütfen malzeme adı giriniz!');
       return;
@@ -2239,7 +2558,6 @@ function MaterialModal({
           </div>
           
           <form onSubmit={handleSubmit} className="space-y-6 max-h-[80vh] overflow-y-auto pr-2">
-            {/* İlk Satır - Zorunlu Alanlar */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2280,7 +2598,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* İkinci Satır - GTIN ve SN (Zorunlu) */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2311,7 +2628,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Üçüncü Satır - UDI Code ve All Barcode */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2340,7 +2656,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Dördüncü Satır - Kategori ve Alt Kategori */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2415,7 +2730,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Beşinci Satır - Stok Bilgileri */}
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2464,7 +2778,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Altıncı Satır - Kritik Stok ve Tedarikçi */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2541,7 +2854,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Yedinci Satır - Diğer Bilgiler */}
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2590,7 +2902,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Sekizinci Satır - Diğer Kodlar */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2619,7 +2930,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Dokuzuncu Satır - Açıklama */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Malzeme Açıklama
@@ -2633,7 +2943,6 @@ function MaterialModal({
               />
             </div>
 
-            {/* Zorunlu alan uyarısı */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-start space-x-3">
                 <AlertTriangle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -2646,7 +2955,6 @@ function MaterialModal({
               </div>
             </div>
 
-            {/* Butonlar */}
             <div className="flex space-x-3 pt-4 border-t border-gray-200">
               <button
                 type="submit"
@@ -2676,6 +2984,7 @@ function MaterialModal({
   );
 }
 
+// ✅ ANA COMPONENT - GÜNCELLENMİŞ VERSİYON
 export default function MaterialManagement() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -2703,51 +3012,44 @@ export default function MaterialManagement() {
     direction: 'asc' | 'desc';
   } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{
+    connected: boolean;
+    message: string;
+  }>({ connected: false, message: 'Bağlantı kontrol ediliyor...' });
   const [cacheBuster, setCacheBuster] = useState(Date.now());
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
   const currentUser = dataService.getCurrentUser();
 
-  useEffect(() => {
-    loadData();
-  }, [cacheBuster]);
+  // ✅ PostgreSQL bağlantı durumunu kontrol et
+  const checkPostgreSQLConnection = async () => {
+    const status = await apiService.checkConnection();
+    setConnectionStatus(status);
+    return status.connected;
+  };
 
+  // ✅ Verileri PostgreSQL'den yükle
   const loadData = async () => {
     setIsLoading(true);
     
     try {
-      console.log('Veriler yükleniyor...');
+      console.log('📡 PostgreSQL veritabanından tüm veriler yükleniyor...');
       
-      // 1. Önce sunucudan verileri almayı dene
-      let serverMaterials: Material[] = [];
-      try {
-        serverMaterials = await apiService.getMaterials();
-        console.log(`${serverMaterials.length} malzeme sunucudan yüklendi`);
-      } catch (serverError) {
-        console.warn('Sunucu bağlantısı yok, sadece dataService kullanılıyor');
+      // Önce bağlantıyı kontrol et
+      const isConnected = await checkPostgreSQLConnection();
+      
+      if (!isConnected) {
+        console.error('❌ PostgreSQL bağlantısı kurulamadı!');
+        setIsLoading(false);
+        return;
       }
       
-      // 2. dataService'daki verileri al
-      const localMaterials = dataService.getMaterials();
-      
-      // 3. Verileri birleştir (önce sunucu, sonra local)
-      let combinedMaterials: Material[] = [];
-      
-      if (serverMaterials.length > 0) {
-        // Sunucudan gelen verileri kullan
-        combinedMaterials = serverMaterials;
-        
-        // dataService'ı sunucu verileriyle sync et
-        serverMaterials.forEach(material => {
-          dataService.saveMaterial(material);
-        });
-      } else {
-        // Sadece dataService verilerini kullan
-        combinedMaterials = localMaterials;
-      }
+      // Malzemeleri yükle
+      const loadedMaterials = await apiService.getMaterials();
+      console.log(`✅ ${loadedMaterials.length} malzeme PostgreSQL'den yüklendi`);
       
       // Yeni eklenen malzemelerin en başa gelmesi için ters sırala
-      const sortedMaterials = [...combinedMaterials].sort((a, b) => {
+      const sortedMaterials = [...loadedMaterials].sort((a, b) => {
         const dateA = new Date(a.createdAt || a.updatedAt || 0).getTime();
         const dateB = new Date(b.createdAt || b.updatedAt || 0).getTime();
         return dateB - dateA; // En yeni en başta
@@ -2755,44 +3057,51 @@ export default function MaterialManagement() {
       
       setMaterials(sortedMaterials);
       
-      // Kategoriler ve tedarikçiler
-      const loadedCategories = dataService.getCategories();
-      const loadedSuppliers = dataService.getSuppliers();
+      // Kategorileri ve tedarikçileri yükle
+      const [loadedCategories, loadedSuppliers] = await Promise.all([
+        apiService.getCategories(),
+        apiService.getSuppliers()
+      ]);
+      
+      console.log(`✅ ${loadedCategories.length} kategori yüklendi`);
+      console.log(`✅ ${loadedSuppliers.length} tedarikçi yüklendi`);
       
       setCategories(loadedCategories);
       setSuppliers(loadedSuppliers);
       
     } catch (error) {
-      console.error('Veri yükleme hatası:', error);
-      // Fallback: sadece dataService'dan yükle
-      const localMaterials = dataService.getMaterials();
-      const sortedMaterials = [...localMaterials].sort((a, b) => {
-        const dateA = new Date(a.createdAt || a.updatedAt || 0).getTime();
-        const dateB = new Date(b.createdAt || b.updatedAt || 0).getTime();
-        return dateB - dateA; // En yeni en başta
-      });
-      setMaterials(sortedMaterials);
+      console.error('❌ PostgreSQL veritabanından veri yükleme hatası:', error);
+      
+      let errorMessage = 'Veriler yüklenirken hata oluştu!';
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch')) {
+          errorMessage = 'PostgreSQL sunucusuna bağlanılamıyor. Lütfen "npm run server" komutunun çalıştığından emin olun.';
+        } else if (error.message.includes('Token bulunamadı')) {
+          errorMessage = 'Oturum süresi doldu. Lütfen tekrar giriş yapın.';
+          window.location.href = '/login';
+        }
+      }
+      
+      alert(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
+  useEffect(() => {
+    loadData();
+    
+    // Her 30 saniyede bir bağlantıyı kontrol et
+    const connectionCheckInterval = setInterval(async () => {
+      await checkPostgreSQLConnection();
+    }, 30000);
+    
+    return () => clearInterval(connectionCheckInterval);
+  }, [cacheBuster]);
+
   const refreshData = () => {
-    // Cache'i temizle ve verileri yeniden yükle
     setCacheBuster(Date.now());
-    
-    // Tarayıcı cache temizleme
-    if (typeof window !== 'undefined') {
-      // localStorage cache temizle
-      localStorage.removeItem('material_cache_version');
-      
-      // API cache önleyici
-      const url = new URL(window.location.href);
-      url.searchParams.set('_t', Date.now().toString());
-      window.history.replaceState({}, '', url.toString());
-    }
-    
-    console.log('Veriler yenileniyor...');
+    console.log('🔄 Veriler yenileniyor...');
   };
 
   const clearAllFilters = () => {
@@ -2820,23 +3129,19 @@ export default function MaterialManagement() {
         bValue = bValue[key];
       });
       
-      // Eğer değerler undefined ise null olarak değerlendir
       if (aValue === undefined || aValue === null) aValue = '';
       if (bValue === undefined || bValue === null) bValue = '';
       
-      // Sayısal değerler için kontrol
       if (typeof aValue === 'number' && typeof bValue === 'number') {
         return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
       }
       
-      // Tarih için kontrol
       if (sortConfig.key.includes('Date') || sortConfig.key.includes('date')) {
         const dateA = new Date(aValue).getTime();
         const dateB = new Date(bValue).getTime();
         return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
       }
       
-      // String değerler için
       aValue = String(aValue).toLowerCase();
       bValue = String(bValue).toLowerCase();
       
@@ -2882,294 +3187,183 @@ export default function MaterialManagement() {
     }
   };
 
+  // ✅ Yeni malzeme ekle - PostgreSQL'e direkt kaydet
   const handleAddMaterial = async (materialData: Omit<Material, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
-      console.log('Yeni malzeme ekleniyor:', materialData);
+      console.log('📤 Yeni malzeme PostgreSQL veritabanına ekleniyor...');
       
-      // 1. Önce dataService'a kaydet (anında görünmesi için)
-      const newMaterial: Material = {
-        ...materialData,
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      // PostgreSQL'e kaydet
+      const newMaterial = await apiService.addMaterial(materialData);
       
-      dataService.saveMaterial(materialData);
-      
-      // 2. State'i hemen güncelle - yeni malzemeyi en başa ekle
+      // State'i güncelle - yeni malzemeyi en başa ekle
       setMaterials(prev => [newMaterial, ...prev]);
       
-      // 3. Sunucuya da gönder (async)
-      try {
-        await apiService.addMaterial(materialData);
-        console.log('Malzeme sunucuya başarıyla gönderildi');
-      } catch (apiError) {
-        console.warn('Sunucuya gönderilemedi, sadece dataService kaydedildi', apiError);
-      }
-      
-      // 4. Sayfayı yenile ve modalı kapat
+      // Sayfayı yenile ve modalı kapat
       setCurrentPage(1);
       setShowAddModal(false);
       
-      dataService.logAction({
-        action: 'YENİ_MALZEME',
-        module: 'MALZEME_YÖNETİMİ',
-        recordId: materialData.barcode,
-        details: `${materialData.name} malzemesi eklendi - Barkod: ${materialData.barcode}`,
-        performedBy: dataService.getCurrentUser().name,
-      });
-      
-      // 5. Kullanıcıya bilgi ver
-      alert(`${materialData.name} malzemesi başarıyla eklendi!`);
+      // Kullanıcıya bilgi ver
+      alert(`${materialData.name} malzemesi başarıyla eklendi!\n\nArtık tüm kullanıcılar bu malzemeyi görebilir.`);
       
     } catch (error) {
-      console.error('Malzeme eklenirken hata oluştu:', error);
-      alert('Malzeme eklenirken bir hata oluştu!');
+      console.error('❌ PostgreSQL veritabanına malzeme eklenemedi:', error);
+      
+      let errorMessage = 'Malzeme eklenirken bir hata oluştu!';
+      if (error instanceof Error) {
+        if (error.message.includes('Bu barkod zaten kayıtlı')) {
+          errorMessage = '❌ Bu barkod zaten başka bir malzemede kullanılıyor!';
+        } else if (error.message.includes('Lütfen önce giriş yapın')) {
+          errorMessage = '❌ Lütfen önce giriş yapın!';
+          window.location.href = '/login';
+        } else {
+          errorMessage = `❌ ${error.message}`;
+        }
+      }
+      
+      alert(errorMessage);
     }
   };
 
+  // ✅ Tedarikçi ekle
   const handleAddSupplier = async (supplierData: Omit<Supplier, 'id'>) => {
     try {
-      console.log('Yeni tedarikçi ekleniyor:', supplierData);
+      console.log('📤 PostgreSQL veritabanına tedarikçi ekleniyor...');
       
-      // 1. Önce dataService'a kaydet
-      const newSupplier: Supplier = {
-        ...supplierData,
-        id: Date.now().toString(),
-        isActive: true
-      };
+      // PostgreSQL'e kaydet
+      const newSupplier = await apiService.addSupplier(supplierData);
       
-      dataService.saveSupplier(supplierData);
-      
-      // 2. State'i güncelle
+      // State'i güncelle
       setSuppliers(prev => [...prev, newSupplier]);
       
-      // 3. Sunucuya da gönder (async)
-      try {
-        await apiService.addSupplier(supplierData);
-        console.log('Tedarikçi sunucuya başarıyla gönderildi');
-      } catch (apiError) {
-        console.warn('Sunucuya gönderilemedi, sadece dataService kaydedildi', apiError);
-      }
-      
-      // 4. Modalı kapat
+      // Modalı kapat
       setShowAddSupplierModal(false);
       
-      dataService.logAction({
-        action: 'YENİ_TEDARİKÇİ',
-        module: 'MALZEME_YÖNETİMİ',
-        recordId: supplierData.name,
-        details: `${supplierData.name} tedarikçisi eklendi`,
-        performedBy: dataService.getCurrentUser().name,
-      });
-      
-      // 5. Kullanıcıya bilgi ver
-      alert(`${supplierData.name} tedarikçisi başarıyla eklendi!`);
+      // Kullanıcıya bilgi ver
+      alert(`${supplierData.name} tedarikçisi başarıyla eklendi!\n\nArtık tüm kullanıcılar bu tedarikçiyi görebilir.`);
       
     } catch (error) {
-      console.error('Tedarikçi eklenirken hata oluştu:', error);
+      console.error('❌ PostgreSQL veritabanına tedarikçi eklenemedi:', error);
       alert('Tedarikçi eklenirken bir hata oluştu!');
     }
   };
 
+  // ✅ Kategori ekle
   const handleAddCategory = async (categoryData: Omit<Category, 'id'>) => {
     try {
-      console.log('Yeni kategori ekleniyor:', categoryData);
+      console.log('📤 PostgreSQL veritabanına kategori ekleniyor...');
       
-      // 1. Önce dataService'a kaydet
-      const newCategory: Category = {
-        ...categoryData,
-        id: Date.now().toString()
-      };
+      // PostgreSQL'e kaydet
+      const newCategory = await apiService.addCategory(categoryData);
       
-      dataService.saveCategory(categoryData);
-      
-      // 2. State'i güncelle
+      // State'i güncelle
       setCategories(prev => [...prev, newCategory]);
       
-      // 3. Sunucuya da gönder (async)
-      try {
-        await apiService.addCategory(categoryData);
-        console.log('Kategori sunucuya başarıyla gönderildi');
-      } catch (apiError) {
-        console.warn('Sunucuya gönderilemedi, sadece dataService kaydedildi', apiError);
-      }
-      
-      // 4. Modalı kapat
+      // Modalı kapat
       setShowAddCategoryModal(false);
       
-      dataService.logAction({
-        action: 'YENİ_KATEGORİ',
-        module: 'MALZEME_YÖNETİMİ',
-        recordId: categoryData.name,
-        details: `${categoryData.name} kategorisi eklendi`,
-        performedBy: dataService.getCurrentUser().name,
-      });
-      
-      // 5. Kullanıcıya bilgi ver
-      alert(`${categoryData.name} kategorisi başarıyla eklendi!`);
+      // Kullanıcıya bilgi ver
+      alert(`${categoryData.name} kategorisi başarıyla eklendi!\n\nArtık tüm kullanıcılar bu kategoriyi görebilir.`);
       
     } catch (error) {
-      console.error('Kategori eklenirken hata oluştu:', error);
+      console.error('❌ PostgreSQL veritabanına kategori eklenemedi:', error);
       alert('Kategori eklenirken bir hata oluştu!');
     }
   };
 
+  // ✅ Malzeme güncelle - PostgreSQL'e direkt kaydet
   const handleUpdateMaterial = async (id: string, updates: Partial<Material>) => {
     try {
-      // 1. Önce dataService'ı güncelle
-      dataService.updateMaterial(id, updates);
+      console.log('✏️ PostgreSQL veritabanında malzeme güncelleniyor...');
       
-      // 2. State'i güncelle
+      // PostgreSQL'de güncelle
+      await apiService.updateMaterial(id, updates);
+      
+      // State'i güncelle
       setMaterials(prev => prev.map(m => 
         m.id === id ? { ...m, ...updates, updatedAt: new Date().toISOString() } : m
       ));
       
-      const material = materials.find(m => m.id === id);
-      dataService.logAction({
-        action: 'MALZEME_GÜNCELLENDİ',
-        module: 'MALZEME_YÖNETİMİ',
-        recordId: material?.barcode || id,
-        details: `${material?.name} malzemesi güncellendi`,
-        performedBy: dataService.getCurrentUser().name,
-      });
-
-      // 3. Sunucuya da gönder (async)
-      try {
-        await apiService.updateMaterial(id, updates);
-        console.log('Güncelleme sunucuya başarıyla gönderildi');
-      } catch (apiError) {
-        console.warn('Sunucuya gönderilemedi, sadece dataService güncellendi', apiError);
-      }
-      
       setEditingMaterial(null);
       setQuickEditMaterial(null);
-      alert('Malzeme başarıyla güncellendi!');
+      
+      alert('Malzeme başarıyla güncellendi!\n\nDeğişiklikler tüm kullanıcılarda görünecek.');
     } catch (error) {
-      console.error('Malzeme güncellenemedi:', error);
+      console.error('❌ PostgreSQL veritabanında malzeme güncellenemedi:', error);
       alert('Malzeme güncellenirken bir hata oluştu!');
     }
   };
 
+  // ✅ Toplu güncelleme
   const handleBulkUpdate = async (materialIds: string[], updates: { field: string; value: any }[]) => {
     try {
-      // 1. Her malzemeyi dataService'da güncelle
-      materialIds.forEach(materialId => {
-        const updateData: any = {};
-        updates.forEach(edit => {
-          updateData[edit.field] = edit.value;
-        });
-        dataService.updateMaterial(materialId, updateData);
+      console.log('✏️ PostgreSQL veritabanında toplu malzeme güncelleniyor...');
+      
+      const updateData: any = {};
+      updates.forEach(edit => {
+        updateData[edit.field] = edit.value;
       });
       
-      // 2. State'i güncelle
+      // PostgreSQL'de toplu güncelle
+      await apiService.bulkUpdateMaterials(materialIds, updateData);
+      
+      // State'i güncelle
       setMaterials(prev => prev.map(m => 
         materialIds.includes(m.id) 
-          ? { ...m, ...Object.fromEntries(updates.map(edit => [edit.field, edit.value])) }
+          ? { ...m, ...updateData, updatedAt: new Date().toISOString() }
           : m
       ));
       
-      dataService.logAction({
-        action: 'TOPLU_MALZEME_GÜNCELLEME',
-        module: 'MALZEME_YÖNETİMİ',
-        recordId: 'TOPLU_GÜNCELLEME',
-        details: `${materialIds.length} malzeme toplu güncellendi`,
-        performedBy: dataService.getCurrentUser().name,
-      });
-      
-      // 3. Sunucuya da gönder (async)
-      try {
-        for (const materialId of materialIds) {
-          const updateData: any = {};
-          updates.forEach(edit => {
-            updateData[edit.field] = edit.value;
-          });
-          await apiService.updateMaterial(materialId, updateData);
-        }
-        console.log('Toplu güncelleme sunucuya başarıyla gönderildi');
-      } catch (apiError) {
-        console.warn('Sunucuya gönderilemedi, sadece dataService güncellendi', apiError);
-      }
-      
       setSelectedMaterials([]);
       setShowSelectAll(false);
-      alert(`${materialIds.length} malzeme başarıyla güncellendi.`);
+      
+      alert(`${materialIds.length} malzeme başarıyla güncellendi!\n\nDeğişiklikler tüm kullanıcılarda görünecek.`);
     } catch (error) {
-      console.error('Toplu güncelleme hatası:', error);
+      console.error('❌ PostgreSQL veritabanında toplu güncelleme hatası:', error);
       alert('Toplu güncelleme yapılırken bir hata oluştu!');
     }
   };
 
+  // ✅ Toplu statü değişikliği
   const handleBulkStatusChange = async (materialIds: string[], newStatus: MaterialStatus) => {
     try {
-      // 1. dataService'ı güncelle
-      materialIds.forEach(materialId => {
-        dataService.updateMaterial(materialId, { status: newStatus });
-      });
+      console.log('✏️ PostgreSQL veritabanında toplu statü değişikliği...');
       
-      // 2. State'i güncelle
+      // PostgreSQL'de toplu güncelle
+      await apiService.bulkUpdateMaterials(materialIds, { status: newStatus });
+      
+      // State'i güncelle
       setMaterials(prev => prev.map(m => 
         materialIds.includes(m.id) 
           ? { ...m, status: newStatus, updatedAt: new Date().toISOString() }
           : m
       ));
       
-      dataService.logAction({
-        action: 'TOPLU_STATÜ_DEĞİŞİKLİĞİ',
-        module: 'MALZEME_YÖNETİMİ',
-        recordId: 'TOPLU_DEĞİŞİKLİK',
-        details: `${materialIds.length} malzemenin statüsü ${newStatus} olarak değiştirildi`,
-        performedBy: dataService.getCurrentUser().name,
-      });
-      
-      // 3. Sunucuya da gönder (async)
-      try {
-        for (const materialId of materialIds) {
-          await apiService.updateMaterial(materialId, { status: newStatus });
-        }
-        console.log('Statü değişikliği sunucuya başarıyla gönderildi');
-      } catch (apiError) {
-        console.warn('Sunucuya gönderilemedi, sadece dataService güncellendi', apiError);
-      }
-      
       setSelectedMaterials([]);
       setShowSelectAll(false);
-      alert(`${materialIds.length} malzemenin statüsü ${newStatus} olarak güncellendi.`);
+      
+      alert(`${materialIds.length} malzemenin statüsü başarıyla değiştirildi!\n\nDeğişiklikler tüm kullanıcılarda görünecek.`);
     } catch (error) {
-      console.error('Toplu statü değişikliği hatası:', error);
+      console.error('❌ PostgreSQL veritabanında toplu statü değişikliği hatası:', error);
       alert('Statü değişikliği yapılırken bir hata oluştu!');
     }
   };
 
+  // ✅ Malzeme sil - PostgreSQL'den direkt sil
   const handleDeleteMaterial = async (id: string) => {
     const material = materials.find(m => m.id === id);
-    if (confirm(`"${material?.name}" malzemesini silmek istediğinizden emin misiniz?`)) {
+    if (confirm(`"${material?.name}" malzemesini silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz ve malzeme tüm kullanıcılardan kaldırılacaktır.`)) {
       try {
-        // 1. Önce dataService'dan sil
-        dataService.deleteMaterial(id);
+        console.log('🗑️ PostgreSQL veritabanından malzeme siliniyor...');
         
-        // 2. State'den sil
+        // PostgreSQL'den sil
+        await apiService.deleteMaterial(id);
+        
+        // State'den sil
         setMaterials(prev => prev.filter(m => m.id !== id));
         
-        dataService.logAction({
-          action: 'MALZEME_SİLİNDİ',
-          module: 'MALZEME_YÖNETİMİ',
-          recordId: material?.barcode || id,
-          details: `${material?.name} malzemesi silindi - Barkod: ${material?.barcode}`,
-          performedBy: dataService.getCurrentUser().name,
-        });
-
-        // 3. Sunucudan da sil (async)
-        try {
-          await apiService.deleteMaterial(id);
-          console.log('Malzeme sunucudan başarıyla silindi');
-        } catch (apiError) {
-          console.warn('Sunucudan silinemedi, sadece dataService silindi', apiError);
-        }
-        
-        alert('Malzeme başarıyla silindi!');
+        alert('Malzeme başarıyla silindi!\n\nMalzeme tüm kullanıcılardan kaldırıldı.');
       } catch (error) {
-        console.error('Malzeme silinemedi:', error);
+        console.error('❌ PostgreSQL veritabanından malzeme silinemedi:', error);
         alert('Malzeme silinirken bir hata oluştu!');
       }
     }
@@ -3284,51 +3478,55 @@ export default function MaterialManagement() {
     document.body.removeChild(link);
   };
 
-  const handleExcelImport = (importedMaterials: any[]) => {
+  const handleExcelImport = async (importedMaterials: any[]) => {
     let successCount = 0;
     let errorCount = 0;
+    const errors: string[] = [];
 
-    importedMaterials.forEach(material => {
+    // Kullanıcıya bilgi ver
+    if (!confirm(`${importedMaterials.length} malzeme içe aktarılacak.\n\nBu işlem biraz zaman alabilir. Devam etmek istiyor musunuz?`)) {
+      return;
+    }
+
+    for (const material of importedMaterials) {
       try {
-        // 1. dataService'a kaydet
-        dataService.saveMaterial(material);
-        
-        // 2. State'e ekle
-        const newMaterial: Material = {
-          ...material,
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        
-        setMaterials(prev => [newMaterial, ...prev]);
+        // PostgreSQL'e her malzemeyi tek tek ekle
+        await apiService.addMaterial(material);
         successCount++;
         
-        // 3. Sunucuya da gönder (async)
-        setTimeout(async () => {
-          try {
-            await apiService.addMaterial(material);
-          } catch (apiError) {
-            console.warn('Sunucuya gönderilemedi', apiError);
-          }
-        }, 0);
+        // İlerleme durumunu göster
+        if (successCount % 10 === 0) {
+          console.log(`📊 ${successCount} malzeme başarıyla aktarıldı...`);
+        }
       } catch (error) {
-        console.error('Malzeme kaydedilemedi:', material, error);
         errorCount++;
+        errors.push(`${material.name || 'Bilinmeyen'}: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}`);
+        
+        if (errors.length <= 5) {
+          console.error('❌ Malzeme aktarılamadı:', material, error);
+        }
       }
-    });
+    }
 
-    dataService.logAction({
-      action: 'TOPLU_MALZEME_AKTARIMI',
-      module: 'MALZEME_YÖNETİMİ',
-      recordId: 'TOPLU_AKTARIM',
-      details: `${successCount} malzeme başarıyla içe aktarıldı, ${errorCount} hata`,
-      performedBy: dataService.getCurrentUser().name,
-    });
-
+    // Verileri yeniden yükle
+    await loadData();
+    
     setCurrentPage(1);
     setShowExcelImport(false);
-    alert(`${successCount} malzeme başarıyla içe aktarıldı${errorCount > 0 ? `, ${errorCount} malzeme aktarılamadı` : ''}`);
+    
+    // Sonuçları göster
+    let message = `${successCount} malzeme başarıyla içe aktarıldı.`;
+    if (errorCount > 0) {
+      message += ` ${errorCount} malzeme aktarılamadı.`;
+      if (errors.length > 0) {
+        message += `\n\nHatalar:\n${errors.slice(0, 5).join('\n')}`;
+        if (errors.length > 5) {
+          message += `\n...ve ${errors.length - 5} hata daha`;
+        }
+      }
+    }
+    
+    alert(message);
   };
 
   const getStockStatusBadge = (material: Material) => {
@@ -3404,19 +3602,28 @@ export default function MaterialManagement() {
 
   return (
     <div className="material-grid-layout cache-buster">
-      {/* Üst Bar - Kompakt */}
+      {/* Üst Bar */}
       <div className="material-toolbar">
         <div className="flex items-center space-x-3">
-          <h2 className="text-lg font-bold text-gray-800">Malzeme Yönetimi</h2>
+          <h2 className="text-lg font-bold text-gray-800">📦 Malzeme Yönetimi</h2>
           <div className="flex items-center space-x-2 text-sm text-gray-600">
             <Package className="h-4 w-4" />
             <span>Toplam: <span className="font-semibold">{filteredMaterials.length}</span></span>
-            {filteredMaterials.length !== materials.length && (
-              <>
-                <span className="text-gray-400">|</span>
-                <span className="text-blue-600">Filtrelenmiş</span>
-              </>
-            )}
+            <div className={`flex items-center space-x-1 ${
+              connectionStatus.connected ? 'text-green-600' : 'text-red-600'
+            }`}>
+              {connectionStatus.connected ? (
+                <>
+                  <CheckCircle className="h-4 w-4" />
+                  <span className="font-medium">✅ PostgreSQL Aktif</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-4 w-4" />
+                  <span className="font-medium">{connectionStatus.message}</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
         
@@ -3424,7 +3631,7 @@ export default function MaterialManagement() {
           <button
             onClick={refreshData}
             className="btn-modern-secondary text-sm"
-            title="Verileri Yenile (Cache Temizle)"
+            title="Verileri PostgreSQL'den Yenile"
           >
             <RefreshCw className="h-4 w-4" />
             <span>Yenile</span>
@@ -3474,16 +3681,16 @@ export default function MaterialManagement() {
         </div>
       </div>
 
-      {/* Yükleniyor gösterimi */}
       {isLoading && (
         <div className="flex flex-col items-center justify-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600">Veriler yükleniyor...</p>
-          <p className="text-sm text-gray-500 mt-2">{materials.length} malzeme yüklendi</p>
+          <p className="text-gray-600">PostgreSQL veritabanından veriler yükleniyor...</p>
+          <p className="text-sm text-gray-500 mt-2">
+            {materials.length} malzeme yüklendi - Gerçek Zamanlı Senkronizasyon Aktif
+          </p>
         </div>
       )}
 
-      {/* Ana içerik - sadece yüklenmediyse göster */}
       {!isLoading && (
         <>
           {/* Arama ve Filtreler */}
@@ -3564,7 +3771,6 @@ export default function MaterialManagement() {
                       </span>
                     </div>
                     
-                    {/* Sistem Yöneticisi için Toplu Düzenleme Butonu */}
                     {(currentUser.role === 'admin' || currentUser.permissions.manageMaterials) && (
                       <button
                         onClick={() => setShowBulkEditModal(true)}
@@ -3598,9 +3804,8 @@ export default function MaterialManagement() {
             </form>
           </div>
 
-          {/* Tablo Container - Yatay ve dikey kaydırma */}
+          {/* Tablo Container */}
           <div className="material-table-container">
-            {/* Kaydırma yönlendirmesi */}
             <div className="material-table-scroll-hint">
               <div className="flex items-center justify-center space-x-2 text-blue-800 text-sm">
                 <MoveHorizontal className="h-4 w-4 animate-pulse" />
@@ -3609,12 +3814,10 @@ export default function MaterialManagement() {
               </div>
             </div>
 
-            {/* Tablo wrapper */}
             <div className="material-table-wrapper" ref={tableContainerRef}>
               <table className="material-table">
                 <thead>
                   <tr>
-                    {/* Checkbox Sütunu - Sabit */}
                     <th className="sticky-left" style={{ width: '50px' }}>
                       <div className="column-header">
                         <button
@@ -3631,7 +3834,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Barkod - Sıralanabilir */}
                     <th style={{ width: '150px' }}>
                       <div className="column-header">
                         <button 
@@ -3644,7 +3846,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* GTIN */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <button 
@@ -3657,7 +3858,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* SN */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <button 
@@ -3670,7 +3870,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* UDI Code */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <button 
@@ -3683,7 +3882,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* All Barcode */}
                     <th style={{ width: '140px' }}>
                       <div className="column-header">
                         <button 
@@ -3696,7 +3894,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Malzeme Adı - Sıralanabilir */}
                     <th style={{ width: '200px' }}>
                       <div className="column-header">
                         <button 
@@ -3709,7 +3906,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Sezgisel Kod */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <button 
@@ -3722,7 +3918,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Statü - Sıralanabilir */}
                     <th style={{ width: '100px' }}>
                       <div className="column-header">
                         <button 
@@ -3735,7 +3930,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Kategori - Sıralanabilir */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <button 
@@ -3748,7 +3942,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Alt Kategori */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <button 
@@ -3761,7 +3954,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Birim - Sıralanabilir */}
                     <th style={{ width: '80px' }}>
                       <div className="column-header">
                         <button 
@@ -3774,7 +3966,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Birim Fiyat - Sıralanabilir */}
                     <th style={{ width: '100px' }}>
                       <div className="column-header">
                         <button 
@@ -3787,7 +3978,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Mevcut Stok - Sıralanabilir */}
                     <th style={{ width: '100px' }}>
                       <div className="column-header">
                         <button 
@@ -3800,7 +3990,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Kritik Stok - Sıralanabilir */}
                     <th style={{ width: '100px' }}>
                       <div className="column-header">
                         <button 
@@ -3813,14 +4002,12 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Stok Durumu */}
                     <th style={{ width: '120px' }}>
                       <div className="column-header">
                         <span className="column-header-text">Stok Durumu</span>
                       </div>
                     </th>
                     
-                    {/* Tedarikçi - Sıralanabilir */}
                     <th style={{ width: '150px' }}>
                       <div className="column-header">
                         <button 
@@ -3833,7 +4020,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* SKT - Sıralanabilir */}
                     <th style={{ width: '100px' }}>
                       <div className="column-header">
                         <button 
@@ -3846,7 +4032,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Seri No Durumu */}
                     <th style={{ width: '140px' }}>
                       <div className="column-header">
                         <button 
@@ -3859,7 +4044,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* Malzeme Açıklama */}
                     <th style={{ width: '200px' }}>
                       <div className="column-header">
                         <button 
@@ -3872,7 +4056,6 @@ export default function MaterialManagement() {
                       </div>
                     </th>
                     
-                    {/* İşlemler - Sabit */}
                     <th className="sticky-right" style={{ width: '120px' }}>
                       <div className="column-header">
                         <span className="column-header-text">İşlemler</span>
@@ -3884,7 +4067,6 @@ export default function MaterialManagement() {
                 <tbody>
                   {currentMaterials.map((material, index) => (
                     <tr key={material.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                      {/* Checkbox - Sabit */}
                       <td className="sticky-left">
                         <input
                           type="checkbox"
@@ -3894,7 +4076,6 @@ export default function MaterialManagement() {
                         />
                       </td>
                       
-                      {/* Barkod */}
                       <td>
                         <div className="group relative">
                           <button
@@ -3909,14 +4090,12 @@ export default function MaterialManagement() {
                         </div>
                       </td>
                       
-                      {/* GTIN */}
                       <td>
                         <span className="font-mono text-sm column-cell">
                           {material.gtin || '-'}
                         </span>
                       </td>
                       
-                      {/* SN */}
                       <td>
                         <div className="group relative">
                           <span className="font-mono text-sm column-cell">
@@ -3925,21 +4104,18 @@ export default function MaterialManagement() {
                         </div>
                       </td>
                       
-                      {/* UDI Code */}
                       <td>
                         <span className="font-mono text-sm column-cell">
                           {material.udiCode || '-'}
                         </span>
                       </td>
                       
-                      {/* All Barcode */}
                       <td>
                         <span className="font-mono text-sm column-cell">
                           {material.allBarcode || '-'}
                         </span>
                       </td>
                       
-                      {/* Malzeme Adı */}
                       <td>
                         <div className="group relative">
                           <button
@@ -3954,7 +4130,6 @@ export default function MaterialManagement() {
                         </div>
                       </td>
                       
-                      {/* Sezgisel Kod */}
                       <td>
                         <div className="group relative">
                           <span className="text-gray-600 text-sm column-cell">
@@ -3963,40 +4138,34 @@ export default function MaterialManagement() {
                         </div>
                       </td>
                       
-                      {/* Statü */}
                       <td>
                         {getStatusBadge(material.status || 'normal')}
                       </td>
                       
-                      {/* Kategori */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell">
                           {material.category}
                         </span>
                       </td>
                       
-                      {/* Alt Kategori */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell">
                           {material.subCategory || '-'}
                         </span>
                       </td>
                       
-                      {/* Birim */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell">
                           {material.unit}
                         </span>
                       </td>
                       
-                      {/* Birim Fiyat */}
                       <td>
                         <span className="text-sm font-medium text-gray-700 column-cell">
                           ₺{material.unitPrice.toFixed(2)}
                         </span>
                       </td>
                       
-                      {/* Mevcut Stok */}
                       <td>
                         <span className={`text-sm font-medium column-cell ${
                           material.currentStock === 0 ? 'text-red-600' :
@@ -4007,26 +4176,22 @@ export default function MaterialManagement() {
                         </span>
                       </td>
                       
-                      {/* Kritik Stok */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell">
                           {material.minStock}
                         </span>
                       </td>
                       
-                      {/* Stok Durumu */}
                       <td>
                         {getStockStatusBadge(material)}
                       </td>
                       
-                      {/* Tedarikçi */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell">
                           {material.supplier || '-'}
                         </span>
                       </td>
                       
-                      {/* SKT */}
                       <td>
                         {material.expirationDate ? (
                           <div className="flex items-center space-x-1">
@@ -4038,21 +4203,18 @@ export default function MaterialManagement() {
                         )}
                       </td>
                       
-                      {/* Seri No Durumu */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell">
                           {material.serialNoStatus || '-'}
                         </span>
                       </td>
                       
-                      {/* Malzeme Açıklama */}
                       <td>
                         <span className="text-sm text-gray-600 column-cell truncate" title={material.materialDescription || ''}>
                           {material.materialDescription || '-'}
                         </span>
                       </td>
                       
-                      {/* İşlemler - Sabit */}
                       <td className="sticky-right">
                         <div className="flex items-center space-x-1">
                           <button
@@ -4090,7 +4252,7 @@ export default function MaterialManagement() {
                           <p className="text-gray-500 text-sm mb-4 max-w-md">
                             {searchTerm || selectedCategory !== 'all' || lowStockOnly || selectedStatus !== 'all'
                               ? 'Arama kriterlerinize uygun malzeme bulunamadı.'
-                              : 'Henüz hiç malzeme eklenmemiş.'
+                              : 'Henüz hiç malzeme eklenmemiş. İlk malzemeyi eklemek için "Yeni Malzeme" butonunu kullanın.'
                             }
                           </p>
                           {(searchTerm || selectedCategory !== 'all' || lowStockOnly || selectedStatus !== 'all') && (

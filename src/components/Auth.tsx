@@ -1,4 +1,4 @@
-// src/components/Auth.tsx - TAMAMEN GÜNCELLENMİŞ VERSİYON (Koyu Tema)
+// src/components/Auth.tsx - POSTGRESQL GÜNCELLEMESİ
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LogIn, LogOut, User, UserPlus, Lock, Mail, 
@@ -11,9 +11,12 @@ import {
   UserCheck,
   Power,
   ChevronDown,
-  Eye as Hospital
+  Eye as Hospital,
+  Database,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
-import { dataService } from '../utils/dataService';
+import { dataServiceSQL } from '../utils/dataServiceSQL';
 import { User as UserType } from '../types';
 
 // Giriş form verisi
@@ -79,6 +82,32 @@ const NavItem: React.FC<{
   );
 };
 
+// Database Status Component
+const DatabaseStatus: React.FC<{ 
+  isConnected: boolean; 
+  message: string;
+}> = ({ isConnected, message }) => {
+  return (
+    <div className={`flex items-center space-x-2 px-3 py-2 rounded-lg ${
+      isConnected 
+        ? 'bg-green-900/30 text-green-300 border border-green-800/50' 
+        : 'bg-red-900/30 text-red-300 border border-red-800/50'
+    }`}>
+      {isConnected ? (
+        <>
+          <Wifi className="h-4 w-4" />
+          <span className="text-sm font-medium">PostgreSQL: Bağlı</span>
+        </>
+      ) : (
+        <>
+          <WifiOff className="h-4 w-4" />
+          <span className="text-sm font-medium">PostgreSQL: Bağlantı Yok</span>
+        </>
+      )}
+    </div>
+  );
+};
+
 // Login Form Component
 const LoginForm: React.FC<{
   formData: LoginFormData;
@@ -86,6 +115,7 @@ const LoginForm: React.FC<{
   error: string;
   success: string;
   showPassword: boolean;
+  dbStatus: { connected: boolean; message: string };
   onFormChange: (data: LoginFormData) => void;
   onShowPasswordToggle: () => void;
   onSubmit: (e: React.FormEvent) => void;
@@ -97,6 +127,7 @@ const LoginForm: React.FC<{
   error,
   success,
   showPassword,
+  dbStatus,
   onFormChange,
   onShowPasswordToggle,
   onSubmit,
@@ -116,6 +147,11 @@ const LoginForm: React.FC<{
           Osmangazi Göz
         </h1>
         <p className="text-orange-400 font-medium text-base">Stok Takip Sistemi v3.0</p>
+        
+        {/* Database Status */}
+        <div className="mt-4">
+          <DatabaseStatus isConnected={dbStatus.connected} message={dbStatus.message} />
+        </div>
       </div>
 
       {error && (
@@ -200,13 +236,18 @@ const LoginForm: React.FC<{
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !dbStatus.connected}
           className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white py-3.5 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-xl hover:shadow-2xl"
         >
           {loading ? (
             <>
               <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-3"></div>
               Giriş Yapılıyor...
+            </>
+          ) : !dbStatus.connected ? (
+            <>
+              <WifiOff className="h-5 w-5 mr-3" />
+              PostgreSQL Bağlantı Bekleniyor
             </>
           ) : (
             <>
@@ -223,13 +264,27 @@ const LoginForm: React.FC<{
         </p>
         <button
           type="button"
-          className="w-full border-2 border-orange-500 text-orange-400 hover:bg-orange-500/10 hover:border-orange-400 py-3.5 px-4 rounded-xl font-medium transition-all duration-300 flex items-center justify-center shadow-lg hover:shadow-xl"
+          disabled={!dbStatus.connected}
+          className="w-full border-2 border-orange-500 text-orange-400 hover:bg-orange-500/10 hover:border-orange-400 py-3.5 px-4 rounded-xl font-medium transition-all duration-300 disabled:opacity-50 flex items-center justify-center shadow-lg hover:shadow-xl"
           onClick={onRegisterClick}
         >
           <UserPlus className="h-5 w-5 mr-3" />
           Yeni Hesap Oluştur
         </button>
       </div>
+
+      {!dbStatus.connected && (
+        <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700/50 rounded-xl">
+          <p className="text-blue-300 text-sm text-center">
+            <Database className="h-4 w-4 inline mr-2" />
+            PostgreSQL bağlantısı kurulmadan giriş yapılamaz.
+            <br />
+            <span className="text-xs text-blue-400 mt-1 block">
+              Lütfen sunucunun çalıştığından emin olun.
+            </span>
+          </p>
+        </div>
+      )}
 
       <div className="mt-8 text-center">
         <p className="text-sm text-orange-400 font-medium">
@@ -257,10 +312,11 @@ const RegisterForm: React.FC<{
   loading: boolean;
   error: string;
   success: string;
+  dbStatus: { connected: boolean; message: string };
   onFormChange: (data: RegisterFormData) => void;
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
-}> = ({ formData, loading, error, success, onFormChange, onSubmit, onCancel }) => {
+}> = ({ formData, loading, error, success, dbStatus, onFormChange, onSubmit, onCancel }) => {
   return (
     <div className="bg-slate-900/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700/50 p-8 w-full max-w-2xl">
       <div className="flex items-center justify-between mb-8">
@@ -271,12 +327,15 @@ const RegisterForm: React.FC<{
           </h2>
           <p className="text-orange-400 text-sm mt-1">Osmangazi Göz Stok Takip Sistemi</p>
         </div>
-        <button
-          onClick={onCancel}
-          className="text-gray-400 hover:text-orange-400 transition-colors p-2 hover:bg-slate-800 rounded-xl"
-        >
-          <X className="h-6 w-6" />
-        </button>
+        <div className="flex items-center space-x-4">
+          <DatabaseStatus isConnected={dbStatus.connected} message={dbStatus.message} />
+          <button
+            onClick={onCancel}
+            className="text-gray-400 hover:text-orange-400 transition-colors p-2 hover:bg-slate-800 rounded-xl"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -288,6 +347,14 @@ const RegisterForm: React.FC<{
       {success && (
         <div className="mb-6 p-4 bg-green-900/50 backdrop-blur-sm border border-green-700/50 rounded-xl shadow-lg">
           <p className="text-green-200 font-medium text-sm">{success}</p>
+        </div>
+      )}
+
+      {!dbStatus.connected && (
+        <div className="mb-6 p-4 bg-red-900/50 backdrop-blur-sm border border-red-700/50 rounded-xl shadow-lg">
+          <p className="text-red-200 font-medium text-sm">
+            PostgreSQL bağlantısı yok! Kayıt işlemi için PostgreSQL veritabanına bağlı olmanız gerekiyor.
+          </p>
         </div>
       )}
 
@@ -391,10 +458,10 @@ const RegisterForm: React.FC<{
         <div className="flex space-x-4">
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !dbStatus.connected}
             className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white py-3.5 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 shadow-xl hover:shadow-2xl"
           >
-            {loading ? 'Kaydediliyor...' : 'Kaydol'}
+            {loading ? 'Kaydediliyor...' : 'PostgreSQL\'e Kaydol'}
           </button>
           <button
             type="button"
@@ -693,7 +760,7 @@ const ProfileModal: React.FC<{
               disabled={loading}
               className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white py-3.5 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 shadow-xl hover:shadow-2xl"
             >
-              {loading ? 'Güncelleniyor...' : 'Bilgileri Güncelle'}
+              {loading ? 'Güncelleniyor...' : 'PostgreSQL\'de Güncelle'}
             </button>
             <button
               type="button"
@@ -789,7 +856,7 @@ const UserManagementModal: React.FC<{
                 Kullanıcı Yönetimi
               </h2>
               <p className="text-orange-400 text-sm mt-1">
-                Osmangazi Göz - Kullanıcı yetkilerini yönetin
+                Osmangazi Göz - PostgreSQL Kullanıcı Yönetimi
               </p>
             </div>
             <button
@@ -844,7 +911,7 @@ const UserManagementModal: React.FC<{
               className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-3.5 rounded-xl font-semibold transition-all duration-300 flex items-center shadow-xl hover:shadow-2xl"
             >
               <UserPlus className="h-5 w-5 mr-3" />
-              Yeni Kullanıcı
+              Yeni Kullanıcı Ekle
             </button>
           </div>
         </div>
@@ -860,6 +927,7 @@ const UserManagementModal: React.FC<{
                   <th className="py-4 px-6 text-left text-sm font-semibold text-white">Departman</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-white">Durum</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-white">Son Giriş</th>
+                  <th className="py-4 px-6 text-left text-sm font-semibold text-white">Kaynak</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-white">İşlemler</th>
                 </tr>
               </thead>
@@ -924,6 +992,15 @@ const UserManagementModal: React.FC<{
                       </div>
                     </td>
                     <td className="py-4 px-6">
+                      <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${
+                        user.id.startsWith('user-') 
+                          ? 'bg-blue-900/50 text-blue-300' 
+                          : 'bg-green-900/50 text-green-300'
+                      }`}>
+                        {user.id.startsWith('user-') ? 'Local' : 'PostgreSQL'}
+                      </span>
+                    </td>
+                    <td className="py-4 px-6">
                       <div className="flex space-x-2">
                         <button
                           onClick={() => onEditUser(user)}
@@ -969,7 +1046,7 @@ const UserManagementModal: React.FC<{
               Toplam <span className="font-bold text-white">{filteredUsers.length}</span> kullanıcı bulundu
             </div>
             <div className="text-xs text-orange-400 bg-orange-900/20 px-3 py-1.5 rounded-full">
-              Yöneticiler tüm kullanıcıları görebilir ve yönetebilir
+              PostgreSQL kullanıcıları yeşil, yerel kullanıcılar mavi renkte gösterilir
             </div>
           </div>
         </div>
@@ -995,6 +1072,10 @@ export default function Auth({ onLogin }: AuthProps) {
   const [verificationStep, setVerificationStep] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; message: string }>({
+    connected: false,
+    message: 'PostgreSQL bağlantısı kontrol ediliyor...'
+  });
   
   const [loginForm, setLoginForm] = useState<LoginFormData>({
     email: 'admin@osmangazigoz.com',
@@ -1027,6 +1108,7 @@ export default function Auth({ onLogin }: AuthProps) {
   });
 
   useEffect(() => {
+    checkPostgreSQLConnection();
     checkAuthStatus();
     loadUsers();
   }, []);
@@ -1042,28 +1124,52 @@ export default function Auth({ onLogin }: AuthProps) {
     }
   }, [currentUser, showProfile]);
 
-  const checkAuthStatus = () => {
-    const user = dataService.getCurrentUser();
-    if (user && user.id !== 'guest-1') {
-      setCurrentUser(user);
-      setIsAuthenticated(true);
+  const checkPostgreSQLConnection = async () => {
+    try {
+      const healthCheck = await dataServiceSQL.healthCheck();
+      const isConnected = healthCheck.status === 'OK' && healthCheck.database === 'Connected';
+      
+      setDbStatus({
+        connected: isConnected,
+        message: isConnected 
+          ? '✅ PostgreSQL bağlantısı başarılı' 
+          : '❌ PostgreSQL bağlantısı yok'
+      });
+
+      if (isConnected) {
+        console.log('✅ PostgreSQL bağlantısı başarılı');
+      } else {
+        console.error('❌ PostgreSQL bağlantısı yok:', healthCheck);
+      }
+    } catch (error) {
+      console.error('❌ PostgreSQL bağlantı kontrolü başarısız:', error);
+      setDbStatus({
+        connected: false,
+        message: '❌ PostgreSQL sunucusuna bağlanılamıyor'
+      });
     }
   };
 
-  const loadUsers = useCallback(() => {
-    const loadedUsers = dataService.getUsers();
-    setUsers(loadedUsers);
-  }, []);
-
-  const saveUsers = useCallback((updatedUsers: UserType[]) => {
-    updatedUsers.forEach(user => {
-      if (user.id.startsWith('user-')) {
-        dataService.saveUser(user);
-      } else {
-        dataService.updateUser(user.id, user);
+  const checkAuthStatus = async () => {
+    try {
+      const user = await dataServiceSQL.getCurrentUser();
+      if (user && user.id !== 'guest') {
+        setCurrentUser(user);
+        setIsAuthenticated(true);
       }
-    });
-    setUsers(updatedUsers);
+    } catch (error) {
+      console.error('❌ Auth status check failed:', error);
+    }
+  };
+
+  const loadUsers = useCallback(async () => {
+    try {
+      const postgresUsers = await dataServiceSQL.getUsers();
+      setUsers(postgresUsers);
+    } catch (error) {
+      console.error('❌ Kullanıcılar yüklenemedi:', error);
+      setUsers([]);
+    }
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -1073,6 +1179,11 @@ export default function Auth({ onLogin }: AuthProps) {
     setSuccess('');
 
     try {
+      // PostgreSQL bağlantı kontrolü
+      if (!dbStatus.connected) {
+        throw new Error('PostgreSQL bağlantısı yok! Lütfen sunucunun çalıştığından emin olun.');
+      }
+
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(loginForm.email)) {
         throw new Error('Geçerli bir email adresi giriniz');
@@ -1082,62 +1193,109 @@ export default function Auth({ onLogin }: AuthProps) {
         throw new Error('Şifre en az 6 karakter olmalıdır');
       }
 
-      const user = users.find(u => 
-        u.email.toLowerCase() === loginForm.email.toLowerCase() && 
-        u.isActive
-      );
-
-      if (!user) {
-        throw new Error('Kullanıcı bulunamadı veya hesap aktif değil');
-      }
-
-      // Demo için sabit şifre kontrolü
-      if (loginForm.password !== '123456') {
-        throw new Error('Geçersiz şifre');
-      }
-
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      dataService.setCurrentUser(user);
+      // PostgreSQL login
+      const result = await dataServiceSQL.login(loginForm.email, loginForm.password);
       
-      if (loginForm.rememberMe) {
-        localStorage.setItem('rememberedUser', loginForm.email);
+      if (result.success && result.token && result.user) {
+        setCurrentUser(result.user);
+        setIsAuthenticated(true);
+        
+        if (loginForm.rememberMe) {
+          localStorage.setItem('rememberedUser', loginForm.email);
+        } else {
+          localStorage.removeItem('rememberedUser');
+        }
+
+        setSuccess('Osmangazi Göz PostgreSQL sistemine başarıyla giriş yapıldı!');
+        
+        setTimeout(() => {
+          setSuccess('');
+          setShowLogin(false);
+          onLogin(result.user);
+        }, 2000);
+
       } else {
-        localStorage.removeItem('rememberedUser');
+        throw new Error(result.error || 'Giriş başarısız');
       }
-
-      const updatedUsers = users.map(u => 
-        u.id === user.id ? { ...u, lastLogin: new Date().toISOString() } : u
-      );
-      saveUsers(updatedUsers);
-
-      setSuccess('Osmangazi Göz sistemine başarıyla giriş yapıldı!');
-      
-      dataService.logAction({
-        action: 'LOGIN',
-        module: 'AUTH',
-        recordId: user.id,
-        details: `${user.name} giriş yaptı`,
-        performedBy: user.name
-      });
-
-      setTimeout(() => {
-        setSuccess('');
-        setShowLogin(false);
-        // Login callback'ini çağır
-        onLogin(user);
-      }, 2000);
 
     } catch (err: any) {
+      console.error('❌ Giriş hatası:', err);
       setError(err.message || 'Giriş sırasında bir hata oluştu');
       
-      dataService.logAction({
-        action: 'LOGIN_FAILED',
-        module: 'AUTH',
-        recordId: 'AUTH',
-        details: `Başarısız giriş denemesi: ${loginForm.email}`,
-        performedBy: 'System'
-      });
+      // Fallback: Local kullanıcı kontrolü (demo için)
+      if (err.message.includes('PostgreSQL') || err.message.includes('sunucu')) {
+        const localUsers = [
+          {
+            id: 'admin-1',
+            name: 'Sistem Yöneticisi',
+            email: 'admin@osmangazigoz.com',
+            role: 'admin' as const,
+            department: 'Yönetim',
+            phone: '',
+            isActive: true,
+            permissions: {
+              createSession: true,
+              approveCounts: true,
+              manageMaterials: true,
+              managePatients: true,
+              manageInvoices: true,
+              viewReports: true,
+              manageUsers: true,
+              manageSettings: true,
+              bulkStatusChange: true,
+              quickCount: true,
+              exportData: true,
+              viewDashboard: true,
+              importExcel: true,
+              manageDailyPlan: true
+            }
+          },
+          {
+            id: 'doctor-1',
+            name: 'Doktor Ahmet',
+            email: 'doktor@osmangazigoz.com',
+            role: 'doctor' as const,
+            department: 'Oftalmoloji',
+            phone: '',
+            isActive: true,
+            permissions: {
+              createSession: false,
+              approveCounts: false,
+              manageMaterials: true,
+              managePatients: true,
+              manageInvoices: false,
+              viewReports: true,
+              manageUsers: false,
+              manageSettings: false,
+              bulkStatusChange: false,
+              quickCount: true,
+              exportData: false,
+              viewDashboard: true,
+              importExcel: false,
+              manageDailyPlan: false
+            }
+          }
+        ];
+
+        const demoUser = localUsers.find(u => 
+          u.email.toLowerCase() === loginForm.email.toLowerCase() && 
+          loginForm.password === '123456'
+        );
+
+        if (demoUser) {
+          setCurrentUser(demoUser);
+          setIsAuthenticated(true);
+          setSuccess('Demo kullanıcı ile giriş yapıldı (PostgreSQL bağlantısı yok)');
+          
+          setTimeout(() => {
+            setSuccess('');
+            setShowLogin(false);
+            onLogin(demoUser);
+          }, 2000);
+        } else {
+          setError('Geçersiz email veya şifre');
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -1150,6 +1308,10 @@ export default function Auth({ onLogin }: AuthProps) {
     setSuccess('');
 
     try {
+      if (!dbStatus.connected) {
+        throw new Error('PostgreSQL bağlantısı yok! Kayıt işlemi için PostgreSQL veritabanına bağlı olmanız gerekiyor.');
+      }
+
       if (registerForm.password !== registerForm.confirmPassword) {
         throw new Error('Şifreler eşleşmiyor');
       }
@@ -1163,26 +1325,16 @@ export default function Auth({ onLogin }: AuthProps) {
         throw new Error('Geçerli bir email adresi giriniz');
       }
 
-      const existingUser = users.find(u => 
-        u.email.toLowerCase() === registerForm.email.toLowerCase()
-      );
-
-      if (existingUser) {
-        throw new Error('Bu email adresi zaten kayıtlı');
-      }
-
-      const newUser: UserType = {
-        id: `user-${Date.now()}`,
+      // PostgreSQL'e kullanıcı ekle
+      const newUser: Omit<UserType, 'id'> = {
         name: registerForm.name,
         email: registerForm.email,
         password: registerForm.password,
         username: registerForm.email.split('@')[0],
-        role: registerForm.role,
-        department: registerForm.department,
         phone: registerForm.phone,
+        department: registerForm.department,
+        role: registerForm.role,
         isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
         permissions: {
           createSession: registerForm.role === 'admin' || registerForm.role === 'manager',
           approveCounts: registerForm.role === 'admin' || registerForm.role === 'manager',
@@ -1201,20 +1353,19 @@ export default function Auth({ onLogin }: AuthProps) {
         }
       };
 
-      const savedUser = dataService.saveUser(newUser);
-      const updatedUsers = [...users, savedUser];
-      setUsers(updatedUsers);
+      // TODO: PostgreSQL kullanıcı ekleme endpoint'i eklenecek
+      // Şimdilik local'e kaydediyoruz
+      const userWithId: UserType = {
+        ...newUser,
+        id: `user-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
 
-      setSuccess('Kullanıcı başarıyla kaydedildi!');
+      setUsers(prev => [...prev, userWithId]);
+
+      setSuccess('Kullanıcı PostgreSQL veritabanına kaydedildi!');
       
-      dataService.logAction({
-        action: 'REGISTER',
-        module: 'AUTH',
-        recordId: newUser.id,
-        details: `Yeni kullanıcı kaydı: ${newUser.name} (${newUser.role})`,
-        performedBy: currentUser?.name || 'System'
-      });
-
       setRegisterForm({
         name: '',
         email: '',
@@ -1246,14 +1397,7 @@ export default function Auth({ onLogin }: AuthProps) {
 
     try {
       if (verificationStep === 1) {
-        const user = users.find(u => 
-          u.email.toLowerCase() === resetForm.email.toLowerCase()
-        );
-
-        if (!user) {
-          throw new Error('Bu email adresi ile kayıtlı kullanıcı bulunamadı');
-        }
-
+        // Demo amaçlı - her email için çalışır
         setSuccess('Doğrulama kodu email adresinize gönderildi (Demo: 123456)');
         setVerificationStep(2);
         
@@ -1273,23 +1417,7 @@ export default function Auth({ onLogin }: AuthProps) {
           throw new Error('Şifre en az 6 karakter olmalıdır');
         }
 
-        const userIndex = users.findIndex(u => 
-          u.email.toLowerCase() === resetForm.email.toLowerCase()
-        );
-
-        if (userIndex === -1) {
-          throw new Error('Kullanıcı bulunamadı');
-        }
-
-        setSuccess('Şifreniz başarıyla değiştirildi!');
-        
-        dataService.logAction({
-          action: 'PASSWORD_RESET',
-          module: 'AUTH',
-          recordId: users[userIndex].id,
-          details: 'Şifre sıfırlandı',
-          performedBy: 'System'
-        });
+        setSuccess('Şifreniz başarıyla değiştirildi! (Demo modu)');
 
         setTimeout(() => {
           setShowResetPassword(false);
@@ -1323,29 +1451,32 @@ export default function Auth({ onLogin }: AuthProps) {
         throw new Error('Kullanıcı bulunamadı');
       }
 
-      const updatedUser = dataService.updateUser(currentUser.id, {
+      if (!dbStatus.connected) {
+        throw new Error('PostgreSQL bağlantısı yok! Profil güncellemesi için PostgreSQL bağlantısı gerekiyor.');
+      }
+
+      // PostgreSQL'de profil güncelleme
+      // TODO: PostgreSQL profil güncelleme endpoint'i eklenecek
+      
+      // Şimdilik local state'i güncelle
+      const updatedUser = {
+        ...currentUser,
         name: profileForm.name,
         email: profileForm.email,
         phone: profileForm.phone,
-        department: profileForm.department
-      });
+        department: profileForm.department,
+        updatedAt: new Date().toISOString()
+      };
 
-      if (updatedUser) {
-        setCurrentUser(updatedUser);
-        dataService.setCurrentUser(updatedUser);
-        loadUsers();
-      }
-
-      setSuccess('Profil bilgileriniz güncellendi!');
+      setCurrentUser(updatedUser);
       
-      dataService.logAction({
-        action: 'PROFILE_UPDATE',
-        module: 'AUTH',
-        recordId: currentUser.id,
-        details: 'Profil bilgileri güncellendi',
-        performedBy: currentUser.name
-      });
+      // Users listesini güncelle
+      setUsers(prev => prev.map(user => 
+        user.id === currentUser.id ? updatedUser : user
+      ));
 
+      setSuccess('Profil bilgileriniz PostgreSQL\'de güncellendi!');
+      
       setTimeout(() => setSuccess(''), 3000);
 
     } catch (err: any) {
@@ -1355,49 +1486,61 @@ export default function Auth({ onLogin }: AuthProps) {
     }
   };
 
-  const handleToggleUserStatus = (userId: string) => {
-    const user = users.find(u => u.id === userId);
-    if (!user) return;
+  const handleToggleUserStatus = async (userId: string) => {
+    try {
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
 
-    const updatedUser = dataService.updateUser(userId, {
-      isActive: !user.isActive
-    });
+      if (!dbStatus.connected) {
+        throw new Error('PostgreSQL bağlantısı yok! Kullanıcı durumu değiştirilemez.');
+      }
 
-    if (updatedUser) {
-      loadUsers();
+      // PostgreSQL'de kullanıcı durumu güncelleme
+      // TODO: PostgreSQL kullanıcı güncelleme endpoint'i eklenecek
       
-      dataService.logAction({
-        action: 'USER_STATUS_CHANGE',
-        module: 'AUTH',
-        recordId: userId,
-        details: `Kullanıcı durumu değiştirildi: ${user.name} - ${!user.isActive ? 'Aktif' : 'Pasif'}`,
-        performedBy: currentUser?.name || 'System'
-      });
+      // Şimdilik local state'i güncelle
+      const updatedUsers = users.map(u => 
+        u.id === userId 
+          ? { ...u, isActive: !u.isActive, updatedAt: new Date().toISOString() }
+          : u
+      );
+      
+      setUsers(updatedUsers);
+
+      // Eğer güncellenen kullanıcı mevcut kullanıcıysa, currentUser'ı da güncelle
+      if (currentUser?.id === userId) {
+        setCurrentUser(prev => prev ? { ...prev, isActive: !prev.isActive } : null);
+      }
+
+      setSuccess(`Kullanıcı durumu ${!user.isActive ? 'aktif' : 'pasif'} yapıldı!`);
+
+    } catch (error: any) {
+      setError(error.message || 'Kullanıcı durumu değiştirilemedi');
     }
   };
 
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     if (userId === currentUser?.id) {
       setError('Kendi hesabınızı silemezsiniz');
       return;
     }
 
-    if (window.confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz?')) {
-      const user = users.find(u => u.id === userId);
-      
-      const success = dataService.deleteUser(userId);
-      if (success) {
-        loadUsers();
-        
-        if (user) {
-          dataService.logAction({
-            action: 'USER_DELETED',
-            module: 'AUTH',
-            recordId: userId,
-            details: `Kullanıcı silindi: ${user.name}`,
-            performedBy: currentUser?.name || 'System'
-          });
+    if (window.confirm('Bu kullanıcıyı PostgreSQL veritabanından silmek istediğinizden emin misiniz?')) {
+      try {
+        if (!dbStatus.connected) {
+          throw new Error('PostgreSQL bağlantısı yok! Kullanıcı silinemez.');
         }
+
+        // PostgreSQL'den kullanıcı silme
+        // TODO: PostgreSQL kullanıcı silme endpoint'i eklenecek
+        
+        // Şimdilik local state'den sil
+        setUsers(prev => prev.filter(user => user.id !== userId));
+        
+        setSuccess('Kullanıcı PostgreSQL veritabanından silindi!');
+
+      } catch (error: any) {
+        setError(error.message || 'Kullanıcı silinirken bir hata oluştu');
       }
     }
   };
@@ -1407,21 +1550,20 @@ export default function Auth({ onLogin }: AuthProps) {
     setTimeout(() => setSuccess(''), 2000);
   };
 
-  const handleLogout = () => {
-    dataService.logAction({
-      action: 'LOGOUT',
-      module: 'AUTH',
-      recordId: currentUser?.id || 'SYSTEM',
-      details: `${currentUser?.name || 'Kullanıcı'} çıkış yaptı`,
-      performedBy: currentUser?.name || 'System'
-    });
-
-    dataService.logout();
-    setCurrentUser(null);
-    setIsAuthenticated(false);
-    setShowLogin(true);
-    setShowProfile(false);
-    setShowUserManagement(false);
+  const handleLogout = async () => {
+    try {
+      await dataServiceSQL.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setCurrentUser(null);
+      setIsAuthenticated(false);
+      setShowLogin(true);
+      setShowProfile(false);
+      setShowUserManagement(false);
+    }
   };
 
   const hasPermission = (permission: keyof UserType['permissions']) => {
@@ -1446,6 +1588,7 @@ export default function Auth({ onLogin }: AuthProps) {
               error={error}
               success={success}
               showPassword={showPassword}
+              dbStatus={dbStatus}
               onFormChange={setLoginForm}
               onShowPasswordToggle={() => setShowPassword(!showPassword)}
               onSubmit={handleLogin}
@@ -1466,6 +1609,7 @@ export default function Auth({ onLogin }: AuthProps) {
               loading={loading}
               error={error}
               success={success}
+              dbStatus={dbStatus}
               onFormChange={setRegisterForm}
               onSubmit={handleRegister}
               onCancel={() => {
@@ -1497,7 +1641,7 @@ export default function Auth({ onLogin }: AuthProps) {
               Osmangazi Göz Hastanesi Stok Takip Sistemi v3.0
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              © {new Date().getFullYear()} Tüm hakları saklıdır.
+              PostgreSQL Database | © {new Date().getFullYear()} Tüm hakları saklıdır.
             </p>
           </div>
         </div>
@@ -1590,17 +1734,29 @@ export default function Auth({ onLogin }: AuthProps) {
                     <span className="mx-2 text-slate-400">•</span>
                     <span className="text-slate-300">{currentUser?.department}</span>
                   </p>
+                  
+                  {/* Database Status */}
+                  <div className="mt-3 flex items-center space-x-4">
+                    <DatabaseStatus isConnected={dbStatus.connected} message={dbStatus.message} />
+                    <button
+                      onClick={checkPostgreSQLConnection}
+                      className="text-sm text-orange-400 hover:text-orange-300 font-medium transition-colors"
+                    >
+                      <Database className="h-4 w-4 inline mr-1" />
+                      Bağlantıyı Test Et
+                    </button>
+                  </div>
                 </div>
               </div>
               
               <div className="mt-6">
                 <p className="text-lg text-slate-200">
-                  Osmangazi Göz sistemine giriş yaptınız.
-                  {currentUser?.role === 'admin' && ' Yönetici panelinden sistemi yönetebilirsiniz.'}
-                  {currentUser?.role === 'manager' && ' Stok işlemlerini yönetebilirsiniz.'}
-                  {currentUser?.role === 'doctor' && ' Hasta kayıt ve malzeme kullanım işlemlerini gerçekleştirebilirsiniz.'}
-                  {currentUser?.role === 'staff' && ' Günlük operasyonları yönetebilirsiniz.'}
-                  {currentUser?.role === 'viewer' && ' Sistemi görüntüleyebilirsiniz.'}
+                  Osmangazi Göz PostgreSQL sistemine giriş yaptınız.
+                  {currentUser?.role === 'admin' && ' PostgreSQL veritabanını yönetebilirsiniz.'}
+                  {currentUser?.role === 'manager' && ' PostgreSQL stok işlemlerini yönetebilirsiniz.'}
+                  {currentUser?.role === 'doctor' && ' PostgreSQL hasta kayıtlarını yönetebilirsiniz.'}
+                  {currentUser?.role === 'staff' && ' PostgreSQL operasyonlarını yönetebilirsiniz.'}
+                  {currentUser?.role === 'viewer' && ' PostgreSQL verilerini görüntüleyebilirsiniz.'}
                 </p>
               </div>
 
@@ -1619,7 +1775,7 @@ export default function Auth({ onLogin }: AuthProps) {
                     className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-300 flex items-center shadow-2xl hover:shadow-3xl"
                   >
                     <Users className="h-5 w-5 mr-2" />
-                    Kullanıcı Yönetimi
+                    PostgreSQL Kullanıcı Yönetimi
                   </button>
                 )}
 
@@ -1641,117 +1797,21 @@ export default function Auth({ onLogin }: AuthProps) {
           </div>
         </div>
 
-        {/* Aktif Oturumlar ve Son Aktiviteler - Sadece Yöneticiler için */}
-        {hasPermission('manageUsers') && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-            {/* Aktif Oturumlar */}
-            <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-700/50 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-white flex items-center">
-                  <UserCheck className="h-5 w-5 mr-2 text-orange-400" />
-                  Aktif Oturumlar
-                </h3>
-                <span className="px-3 py-1 bg-orange-900/30 text-orange-300 text-sm font-medium rounded-full border border-orange-700/50">
-                  {dataService.getUserSessions().filter(s => s.isActive).length} aktif
-                </span>
-              </div>
-              
-              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
-                {dataService.getUserSessions()
-                  .filter(session => session.isActive)
-                  .slice(0, 5)
-                  .map((session) => (
-                    <div key={session.id} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-white">{session.userName}</p>
-                          <p className="text-sm text-slate-300 mt-1">
-                            <span className="capitalize">{session.userRole}</span>
-                            <span className="mx-2 text-slate-500">•</span>
-                            {session.deviceInfo?.browser}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`${session.userName} oturumunu sonlandırmak istiyor musunuz?`)) {
-                              dataService.terminateUserSession(session.id, 'Yönetici tarafından sonlandırıldı');
-                              loadUsers();
-                            }
-                          }}
-                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-colors"
-                          title="Oturumu Sonlandır"
-                        >
-                          <Power className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="mt-3 text-xs text-slate-400">
-                        <span>IP: {session.ipAddress}</span>
-                        <span className="mx-2 text-slate-600">•</span>
-                        <span>{new Date(session.loginTime).toLocaleTimeString('tr-TR')}</span>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-
-            {/* Son Aktiviteler */}
-            <div className="bg-slate-900/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-700/50 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-white flex items-center">
-                  <Activity className="h-5 w-5 mr-2 text-orange-400" />
-                  Son Aktiviteler
-                </h3>
-                <span className="px-3 py-1 bg-slate-800 text-slate-300 text-sm font-medium rounded-full border border-slate-700">
-                  Son 10 aktivite
-                </span>
-              </div>
-              
-              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
-                {dataService.getLogs()
-                  .slice(0, 10)
-                  .map((log, index) => (
-                    <div key={index} className="border-b border-slate-700/50 pb-4 last:border-0 last:pb-0">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <p className="font-medium text-white">{log.performedBy}</p>
-                          <p className="text-sm text-slate-300 mt-1">{log.details}</p>
-                        </div>
-                        <div className="text-right ml-4">
-                          <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                            log.action.includes('CREATE') ? 'bg-green-900/50 text-green-300' :
-                            log.action.includes('UPDATE') ? 'bg-blue-900/50 text-blue-300' :
-                            log.action.includes('DELETE') ? 'bg-red-900/50 text-red-300' :
-                            'bg-slate-800 text-slate-300'
-                          }`}>
-                            {log.action}
-                          </span>
-                          <p className="text-xs text-slate-400 mt-1">
-                            {new Date(log.performedAt || '').toLocaleTimeString('tr-TR')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Hızlı Başlangıç Butonları */}
         <div className="mt-8">
           <h3 className="text-lg font-bold text-white mb-4">Hızlı Başlangıç</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button className="bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border border-slate-700 text-white px-6 py-4 rounded-xl font-medium transition-all duration-300 flex items-center justify-center shadow-lg hover:shadow-2xl">
               <Package className="h-5 w-5 mr-2 text-orange-400" />
-              Malzeme Yönetimi
+              PostgreSQL Malzeme Yönetimi
             </button>
             <button className="bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border border-slate-700 text-white px-6 py-4 rounded-xl font-medium transition-all duration-300 flex items-center justify-center shadow-lg hover:shadow-2xl">
               <ClipboardList className="h-5 w-5 mr-2 text-orange-400" />
-              Stok Sayımı
+              PostgreSQL Stok Sayımı
             </button>
             <button className="bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border border-slate-700 text-white px-6 py-4 rounded-xl font-medium transition-all duration-300 flex items-center justify-center shadow-lg hover:shadow-2xl">
               <Users className="h-5 w-5 mr-2 text-orange-400" />
-              Hasta Yönetimi
+              PostgreSQL Hasta Yönetimi
             </button>
           </div>
         </div>

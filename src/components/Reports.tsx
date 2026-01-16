@@ -13,7 +13,7 @@ import {
   Eye
 } from 'lucide-react';
 import { Material, Patient, PatientMaterialUsage, Invoice, SystemLog, MaterialUsageAnalysis, StockValueAnalysis, YearlySummary } from '../types';
-import { dataService } from '../utils/dataService';
+import { dataServiceSQL } from '../utils/dataServiceSQL';
 
 // Modal bileşenleri
 interface MaterialsModalProps {

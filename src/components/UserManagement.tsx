@@ -20,9 +20,7 @@ import {
 import { User, UserSession } from '../types';
 
 // PostgreSQL API Client
-const API_BASE = process.env.NODE_ENV === 'production' 
-  ? 'https://stock-dashboard-p5ip.onrender.com/api'
-  : 'http://localhost:10000/api';
+const API_BASE = 'http://localhost:5000/api';
 
 // Token'ı localStorage'dan al
 const getToken = () => {

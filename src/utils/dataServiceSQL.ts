@@ -3,9 +3,7 @@
 
 import { Material, Category, Supplier, User } from '../types';
 
-const API_BASE_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:10000/api'
-  : '/api';
+const API_BASE_URL = 'http://localhost:5000/api';
 
 export class DataServiceSQL {
   private static instance: DataServiceSQL;

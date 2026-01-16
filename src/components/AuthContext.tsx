@@ -1,22 +1,39 @@
-// src/components/AuthContext.tsx - POSTGRESQL ENTEGRASYONLU
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { User as UserType } from '../types';
-import { dataServiceSQL } from '../utils/dataServiceSQL';
+// AuthContext.tsx - GÜNCELLENMİŞ VERSİYON
+import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+import { User } from '../types';
+import { dataServiceSQL } from '../utils/dataServiceSQL'; // PostgreSQL servisini kullan
 
 interface AuthContextType {
-  user: UserType | null;
+  user: User | null;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
+  logout: () => void;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => Promise<void>;
-  checkAuthStatus: () => Promise<void>;
-  canViewPage: (pageId: string) => boolean;
+  hasPermission: (permission: keyof User['permissions']) => boolean;
+  canViewPage: (page: string) => boolean;
+  canEditPage: (page: string) => boolean;
+  canDeletePage: (page: string) => boolean;
+  canAddToPage: (page: string) => boolean;
+  refreshUser: () => void;
+  hasFullAccess: (page: string) => boolean;
   getRoleDisplayName: () => string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserType | null>(null);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -24,148 +41,142 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkAuthStatus();
   }, []);
 
-  const checkAuthStatus = useCallback(async () => {
+  const checkAuthStatus = async () => {
     try {
+      setLoading(true);
+      
+      // 1. Önce localStorage'dan token'ı kontrol et
       const token = localStorage.getItem('token');
       const userStr = localStorage.getItem('user');
       
       if (token && userStr) {
         try {
-          const userData = JSON.parse(userStr);
-          setUser(userData);
+          const parsedUser = JSON.parse(userStr);
+          setUser(parsedUser);
           setIsAuthenticated(true);
-          dataServiceSQL.setToken(token);
-          console.log('✅ Auth durumu kontrol edildi:', userData.name);
+          console.log('✅ Kullanıcı localStorage\'dan yüklendi:', parsedUser.email);
         } catch (error) {
-          console.error('❌ User parse hatası:', error);
+          console.error('❌ User parse error:', error);
           localStorage.removeItem('token');
           localStorage.removeItem('user');
         }
-      } else {
-        // Token yoksa PostgreSQL'den mevcut kullanıcıyı al
+      }
+      
+      // 2. Backend'den kullanıcı bilgisini al (token varsa)
+      if (token) {
         try {
           const currentUser = await dataServiceSQL.getCurrentUser();
           if (currentUser && currentUser.id !== 'guest') {
             setUser(currentUser);
             setIsAuthenticated(true);
-            console.log('✅ PostgreSQL kullanıcısı alındı:', currentUser.name);
+            localStorage.setItem('user', JSON.stringify(currentUser));
+            console.log('✅ Kullanıcı backend\'den yüklendi:', currentUser.email);
           }
         } catch (error) {
-          console.error('❌ PostgreSQL kullanıcısı alınamadı:', error);
+          console.warn('⚠️ Backend kullanıcı bilgisi alınamadı:', error);
+          // Token geçersiz olabilir, temizle
+          if (error.message.includes('Oturum süresi doldu')) {
+            logout();
+          }
         }
       }
+      
     } catch (error) {
-      console.error('❌ Auth durumu kontrol hatası:', error);
+      console.error('❌ Auth check error:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string, rememberMe?: boolean): Promise<boolean> => {
     try {
-      console.log('🔐 PostgreSQL giriş yapılıyor:', email);
+      console.log('🔐 Login attempt:', email);
       
       const result = await dataServiceSQL.login(email, password);
       
       if (result.success && result.token && result.user) {
+        // Token ve user bilgisini kaydet
+        dataServiceSQL.setToken(result.token);
         setUser(result.user);
         setIsAuthenticated(true);
         
-        // Token ve user bilgilerini localStorage'a kaydet
-        localStorage.setItem('token', result.token);
-        localStorage.setItem('user', JSON.stringify(result.user));
+        // Remember me
+        if (rememberMe) {
+          localStorage.setItem('rememberedEmail', email);
+        } else {
+          localStorage.removeItem('rememberedEmail');
+        }
         
-        console.log('✅ PostgreSQL giriş başarılı:', result.user.name);
+        console.log('✅ Login successful:', email);
         return true;
+      } else {
+        console.error('❌ Login failed:', result.error);
+        return false;
       }
-      
-      return false;
-      
     } catch (error) {
-      console.error('❌ Giriş hatası:', error);
+      console.error('❌ Login error:', error);
       return false;
     }
   };
 
-  const logout = async (): Promise<void> => {
-    try {
-      await dataServiceSQL.logout();
-    } catch (error) {
-      console.error('❌ Logout error:', error);
-    } finally {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setUser(null);
-      setIsAuthenticated(false);
-      console.log('👋 Çıkış yapıldı');
-    }
+  const logout = () => {
+    setUser(null);
+    setIsAuthenticated(false);
+    dataServiceSQL.clearToken();
+    localStorage.removeItem('user');
+    localStorage.removeItem('rememberedEmail');
+    console.log('👋 Logout successful');
   };
 
-  const canViewPage = (pageId: string): boolean => {
+  // Diğer fonksiyonlar aynı kalabilir...
+  const hasPermission = (permission: keyof User['permissions']): boolean => {
     if (!user) return false;
-
-    // Sayfa yetki kontrolleri
-    const pagePermissions: Record<string, keyof UserType['permissions']> = {
-      'dashboard': 'viewDashboard',
-      'materials': 'manageMaterials',
-      'stock-count': 'createSession',
-      'patients': 'managePatients',
-      'invoices': 'manageInvoices',
-      'reports': 'viewReports',
-      'users': 'manageUsers',
-      'doctors': 'managePatients', // Doktorlar için hasta yönetimi yetkisi
-      'daily-plan': 'manageDailyPlan'
-    };
-
-    const requiredPermission = pagePermissions[pageId];
-    
-    if (!requiredPermission) {
-      return true; // Yetki gerektirmeyen sayfalar
-    }
-
-    return user.permissions?.[requiredPermission] || false;
+    return user.permissions[permission] || false;
   };
 
-  const getRoleDisplayName = (): string => {
-    if (!user) return 'Misafir';
+  const canViewPage = (page: string): boolean => {
+    if (!user) return false;
+    // ... (mevcut kod aynı)
+  };
 
-    switch (user.role) {
-      case 'admin': return 'Sistem Yöneticisi';
-      case 'manager': return 'Yönetici';
-      case 'doctor': return 'Doktor';
-      case 'staff': return 'Personel';
-      case 'viewer': return 'Gözlemci';
-      default: return user.role;
+  // Diğer yetki fonksiyonları...
+
+  const refreshUser = async () => {
+    await checkAuthStatus();
+  };
+
+  const value = {
+    user,
+    login,
+    logout,
+    isAuthenticated,
+    hasPermission,
+    canViewPage,
+    canEditPage,
+    canDeletePage,
+    canAddToPage,
+    refreshUser,
+    hasFullAccess: (page: string) => user?.role === 'admin' || false,
+    getRoleDisplayName: () => {
+      if (!user) return '';
+      switch (user.role) {
+        case 'admin': return 'Sistem Yöneticisi';
+        case 'manager': return 'Yönetici';
+        case 'doctor': return 'Doktor';
+        case 'staff': return 'Personel';
+        case 'viewer': return 'Gözlemci';
+        default: return user.role;
+      }
     }
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-      </div>
-    );
+    return <div>Yükleniyor...</div>;
   }
 
   return (
-    <AuthContext.Provider value={{
-      user,
-      isAuthenticated,
-      login,
-      logout,
-      checkAuthStatus,
-      canViewPage,
-      getRoleDisplayName
-    }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };

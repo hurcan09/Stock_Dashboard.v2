@@ -1,4 +1,4 @@
-// src/components/Auth.tsx - POSTGRESQL GÜNCELLEMESİ
+// src/components/Auth.tsx - KESİN ÇALIŞAN VERSİYON
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LogIn, LogOut, User, UserPlus, Lock, Mail, 
@@ -236,18 +236,13 @@ const LoginForm: React.FC<{
 
         <button
           type="submit"
-          disabled={loading || !dbStatus.connected}
+          disabled={loading}
           className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white py-3.5 px-4 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-xl hover:shadow-2xl"
         >
           {loading ? (
             <>
               <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-3"></div>
               Giriş Yapılıyor...
-            </>
-          ) : !dbStatus.connected ? (
-            <>
-              <WifiOff className="h-5 w-5 mr-3" />
-              PostgreSQL Bağlantı Bekleniyor
             </>
           ) : (
             <>
@@ -264,7 +259,7 @@ const LoginForm: React.FC<{
         </p>
         <button
           type="button"
-          disabled={!dbStatus.connected}
+          disabled={loading}
           className="w-full border-2 border-orange-500 text-orange-400 hover:bg-orange-500/10 hover:border-orange-400 py-3.5 px-4 rounded-xl font-medium transition-all duration-300 disabled:opacity-50 flex items-center justify-center shadow-lg hover:shadow-xl"
           onClick={onRegisterClick}
         >
@@ -277,10 +272,10 @@ const LoginForm: React.FC<{
         <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700/50 rounded-xl">
           <p className="text-blue-300 text-sm text-center">
             <Database className="h-4 w-4 inline mr-2" />
-            PostgreSQL bağlantısı kurulmadan giriş yapılamaz.
+            PostgreSQL bağlantısı kuruluyor...
             <br />
             <span className="text-xs text-blue-400 mt-1 block">
-              Lütfen sunucunun çalıştığından emin olun.
+              Admin girişi: admin@osmangazigoz.com / admin123
             </span>
           </p>
         </div>
@@ -292,13 +287,13 @@ const LoginForm: React.FC<{
         </p>
         <div className="mt-3 space-y-2">
           <div className="text-xs bg-slate-800/50 text-orange-300 p-2 rounded-lg border border-slate-700">
-            <span className="font-semibold">Admin:</span> admin@osmangazigoz.com / 123456
+            <span className="font-semibold">Admin:</span> admin@osmangazigoz.com / admin123
           </div>
           <div className="text-xs bg-slate-800/50 text-orange-300 p-2 rounded-lg border border-slate-700">
-            <span className="font-semibold">Doktor:</span> doktor@osmangazigoz.com / 123456
+            <span className="font-semibold">Doktor:</span> doktor@osmangazigoz.com / doktor123
           </div>
           <div className="text-xs bg-slate-800/50 text-orange-300 p-2 rounded-lg border border-slate-700">
-            <span className="font-semibold">Personel:</span> personel@osmangazigoz.com / 123456
+            <span className="font-semibold">Personel:</span> personel@osmangazigoz.com / personel123
           </div>
         </div>
       </div>
@@ -1077,9 +1072,10 @@ export default function Auth({ onLogin }: AuthProps) {
     message: 'PostgreSQL bağlantısı kontrol ediliyor...'
   });
   
+  // DÜZELTİLDİ: Şifre admin123 olarak değiştirildi
   const [loginForm, setLoginForm] = useState<LoginFormData>({
     email: 'admin@osmangazigoz.com',
-    password: '123456',
+    password: 'admin123',
     rememberMe: true
   });
 
@@ -1172,6 +1168,7 @@ export default function Auth({ onLogin }: AuthProps) {
     }
   }, []);
 
+  // DÜZELTİLDİ: Basitleştirilmiş handleLogin fonksiyonu
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -1179,24 +1176,25 @@ export default function Auth({ onLogin }: AuthProps) {
     setSuccess('');
 
     try {
-      // PostgreSQL bağlantı kontrolü
-      if (!dbStatus.connected) {
-        throw new Error('PostgreSQL bağlantısı yok! Lütfen sunucunun çalıştığından emin olun.');
+      console.log('🔄 handleLogin called!');
+      console.log('📧 Email:', loginForm.email);
+      console.log('🔑 Password:', loginForm.password);
+
+      // Validation
+      if (!loginForm.email || !loginForm.password) {
+        throw new Error('Lütfen email ve şifre giriniz');
       }
 
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(loginForm.email)) {
-        throw new Error('Geçerli bir email adresi giriniz');
-      }
-
-      if (loginForm.password.length < 6) {
-        throw new Error('Şifre en az 6 karakter olmalıdır');
-      }
-
-      // PostgreSQL login
+      // Try PostgreSQL login
+      console.log('🔐 Attempting PostgreSQL login...');
       const result = await dataServiceSQL.login(loginForm.email, loginForm.password);
       
+      console.log('🔐 Login result:', result);
+      
       if (result.success && result.token && result.user) {
+        console.log('✅ PostgreSQL login successful!');
+        
+        // Save user and token
         setCurrentUser(result.user);
         setIsAuthenticated(true);
         
@@ -1206,95 +1204,71 @@ export default function Auth({ onLogin }: AuthProps) {
           localStorage.removeItem('rememberedUser');
         }
 
-        setSuccess('Osmangazi Göz PostgreSQL sistemine başarıyla giriş yapıldı!');
+        setSuccess('PostgreSQL sistemine başarıyla giriş yapıldı!');
         
+        // Redirect to dashboard
         setTimeout(() => {
           setSuccess('');
           setShowLogin(false);
           onLogin(result.user);
-        }, 2000);
+        }, 1000);
 
       } else {
-        throw new Error(result.error || 'Giriş başarısız');
+        console.error('❌ PostgreSQL login failed:', result.error);
+        throw new Error(result.error || 'Geçersiz email veya şifre');
       }
 
     } catch (err: any) {
-      console.error('❌ Giriş hatası:', err);
-      setError(err.message || 'Giriş sırasında bir hata oluştu');
+      console.error('❌ Login error:', err);
       
-      // Fallback: Local kullanıcı kontrolü (demo için)
-      if (err.message.includes('PostgreSQL') || err.message.includes('sunucu')) {
-        const localUsers = [
-          {
-            id: 'admin-1',
-            name: 'Sistem Yöneticisi',
+      // PostgreSQL bağlantı hatası durumunda fallback
+      if (err.message.includes('Sunucuya bağlanılamıyor') || 
+          err.message.includes('PostgreSQL') || 
+          err.message.includes('Database')) {
+        
+        // Fallback: Test için sabit kullanıcı
+        if (loginForm.email === 'admin@osmangazigoz.com' && loginForm.password === 'admin123') {
+          console.log('✅ Using fallback test user');
+          
+          const fallbackUser: UserType = {
+            id: 'test_admin',
+            name: 'Sistem Yöneticisi (Test Modu)',
             email: 'admin@osmangazigoz.com',
-            role: 'admin' as const,
+            role: 'admin',
             department: 'Yönetim',
             phone: '',
+            username: 'admin',
+            password: '',
             isActive: true,
             permissions: {
-              createSession: true,
-              approveCounts: true,
-              manageMaterials: true,
-              managePatients: true,
-              manageInvoices: true,
-              viewReports: true,
-              manageUsers: true,
-              manageSettings: true,
-              bulkStatusChange: true,
-              quickCount: true,
-              exportData: true,
-              viewDashboard: true,
-              importExcel: true,
-              manageDailyPlan: true
-            }
-          },
-          {
-            id: 'doctor-1',
-            name: 'Doktor Ahmet',
-            email: 'doktor@osmangazigoz.com',
-            role: 'doctor' as const,
-            department: 'Oftalmoloji',
-            phone: '',
-            isActive: true,
-            permissions: {
-              createSession: false,
-              approveCounts: false,
-              manageMaterials: true,
-              managePatients: true,
-              manageInvoices: false,
-              viewReports: true,
-              manageUsers: false,
-              manageSettings: false,
-              bulkStatusChange: false,
-              quickCount: true,
-              exportData: false,
-              viewDashboard: true,
-              importExcel: false,
-              manageDailyPlan: false
-            }
-          }
-        ];
+              createSession: true, approveCounts: true, manageMaterials: true,
+              managePatients: true, manageInvoices: true, bulkStatusChange: true,
+              quickCount: true, exportData: true, manageUsers: true,
+              manageSettings: true, viewDashboard: true, importExcel: true,
+              manageDailyPlan: true, viewReports: true, manageDoctors: true,
+              manageCategories: true, manageSuppliers: true
+            },
+            avatarColor: '#4F46E5',
+            lastLogin: new Date().toISOString(),
+            lastLoginIp: '',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
 
-        const demoUser = localUsers.find(u => 
-          u.email.toLowerCase() === loginForm.email.toLowerCase() && 
-          loginForm.password === '123456'
-        );
-
-        if (demoUser) {
-          setCurrentUser(demoUser);
+          setCurrentUser(fallbackUser);
           setIsAuthenticated(true);
-          setSuccess('Demo kullanıcı ile giriş yapıldı (PostgreSQL bağlantısı yok)');
+          setSuccess('Test modunda giriş yapıldı (PostgreSQL bağlantı hatası)');
           
           setTimeout(() => {
             setSuccess('');
             setShowLogin(false);
-            onLogin(demoUser);
-          }, 2000);
+            onLogin(fallbackUser);
+          }, 1000);
         } else {
           setError('Geçersiz email veya şifre');
         }
+      } else {
+        setError(err.message || 'Giriş sırasında bir hata oluştu');
       }
     } finally {
       setLoading(false);

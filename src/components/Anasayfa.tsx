@@ -50,7 +50,7 @@ import {
   CloudSun
 } from 'lucide-react';
 
-import { dataService } from '../utils/dataService';
+import { dataServiceSQL } from '../utils/dataServiceSQL.ts';
 import { User, DailyPlan, Meal, Surgery, Appointment, Doctor } from '../types';
 import { useAuth } from '../components/AuthContext.tsx';
 

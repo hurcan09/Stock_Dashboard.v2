@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node v6/render-build.mjs",
     "preview": "vite preview",
-    "start": "set NODE_ENV=development&& node server/index.js",
+    "start": "node v6/render-server.mjs",
     "server": "set NODE_ENV=development&& node server/index.js",
     "server:dev": "set NODE_ENV=development&& nodemon server/index.js",
     "dev:full": "concurrently \"npm run server\" \"npm run dev\""
@@ -43,6 +43,6 @@
     "typescript": "^5.3.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   }
 }

@@ -18,7 +18,7 @@ function seedData(){
   const lines=catalog.map((name,i)=>{
    const id=branch.id+'-'+(i+1),expected=20+index*5+i,actual=expected-(i%4===0?2:0),price=1250+i*175;
    state.products.push({id,branch:branch.id,name,sku:(index?'ANK':'IZM')+'-'+String(i+1).padStart(3,'0'),quantity:actual,price,minimum:10});
-   return {id,name,expected,actual,quantity:expected,price};
+   return {id,name,expected,actual,quantity:expected,price,valuationPrice:price};
   });
   state.invoices.push({id:'f-'+branch.id,branch:branch.id,number:'FTR-2026-11-00'+(index+1),supplier:'Mavi Ambalaj',date,lines});
   state.counts.push({id:'s-'+branch.id,branch:branch.id,title:'Kasım Sayımı · '+branch.name,date,author:index?'demo-5':'demo-4',authorName:index?'Bora Sel':'Duru Kaya',lines});
@@ -69,7 +69,7 @@ export async function inventoryApi(db,member,user,req,path){
    if(!owner&&!manager)return error(403,'Malzeme ekleme yetkiniz yok.');
    const name=clean(data.name),sku=clean(data.sku);
    if(!name||!sku||!integer(data.quantity)||!integer(data.minimum)||!integer(data.price,100000000)||state.products.some(row=>row.branch===branch.id&&row.sku===sku))return error(400,'Benzersiz stok kodu ve geçerli miktar girin.');
-   state.products.push({id,branch:branch.id,name,sku,quantity:data.quantity,minimum:data.minimum,price:data.price});
+   state.products.push({id,branch:branch.id,name,sku,barcode:clean(data.barcode),quantity:data.quantity,minimum:data.minimum,price:data.price});
   }else if(path==='/api/inventory/invoices'||path==='/api/inventory/counts'){
    const invoice=path.endsWith('/invoices');
    if(invoice&&!owner&&!manager)return error(403,'Fatura kaydetme yetkiniz yok.');
@@ -84,7 +84,7 @@ export async function inventoryApi(db,member,user,req,path){
      lines.push({id:product.id,name:product.name,quantity:line.quantity,price:line.price});
      product.quantity+=line.quantity;product.price=line.price;
     }else{
-     lines.push({id:product.id,name:product.name,expected:product.quantity,actual:line.quantity});
+     lines.push({id:product.id,name:product.name,expected:product.quantity,actual:line.quantity,valuationPrice:product.price});
      product.quantity=line.quantity;
     }
    }

@@ -1,7 +1,8 @@
+import ReportAnalytics from './ReportAnalytics';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
-export type Product = { id:string; name:string; branch:string; sku:string; quantity:number; minimum:number; price:number };
-type Line = { id:string; name:string; quantity:number; price:number; actual:number; expected:number };
+export type Product = { id:string; name:string; branch:string; sku:string; barcode?:string; quantity:number; minimum:number; price:number };
+export type Line = { id:string; name:string; quantity:number; price:number; actual:number; expected:number; valuationPrice?:number };
 type RecordBase = { id:string; branch:string; date:string; lines:Line[] };
 type Invoice = RecordBase & {number:string; supplier:string};
 type Count = RecordBase & {title:string;authorName:string};
@@ -99,11 +100,12 @@ export default function InventoryPanel({page,data,reload,navigate}:{page:string;
   const save=async(path:string,payload:object)=>{await api('inventory/'+path,payload);await reload();};
   const isOwner=data.role==='owner';
   const title:Record<string,string>={dashboard:'Stok özeti',materials:'Malzeme Yönetimi','stock-count':'Stok Sayımı','count-history':'Sayım Geçmişi',invoices:'Fatura Yönetimi',reports:'Raporlar ve İstatistikler',users:'Kullanıcı Yönetimi','company-team':'Şirket ve Ekip'};
+  if(page==='reports')return <ReportAnalytics data={data}/>;
   return <div className="space-y-4">
     <header className="rounded-xl bg-[#103854] p-5 text-white"><h1 className="text-2xl font-bold">{title[page]}</h1><p>{data.company} · {roles[data.role]}</p></header>
     {page==='users'||page==='company-team'?<TeamPanel data={data} settings={page==='company-team'} reload={reload}/>:<>
     {isOwner&&<div className={card}><Choice label="Şube filtresi" name="filter" value={filter} onChange={setFilter}><option value="">Tüm şubeler</option>{branchOptions(data.branches)}</Choice></div>}
-    {(page==='dashboard'||page==='reports')&&<>
+    {page==='dashboard'&&<>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{[
         ['Malzeme',products.length],['Sayım oturumu',counts.length],['Kritik stok',products.filter(p=>p.quantity<=p.minimum).length],
         ['Stok değeri',money(products.reduce((s,p)=>s+p.quantity*p.price,0))],['Fatura',invoices.length],['Fatura toplamı',money(invoices.reduce((s,i)=>s+sumInvoice(i),0))],
@@ -116,7 +118,7 @@ export default function InventoryPanel({page,data,reload,navigate}:{page:string;
       <section className={card}><label>Malzeme ara<input className={input} value={search} onChange={e=>setSearch(e.target.value)}/></label><Table head={['Malzeme','Kod','Şube','Adet','Birim fiyat']} rows={products.filter(p=>(p.name+' '+p.sku).toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr'))).map(p=>[p.name,p.sku,branch(p.branch),p.quantity,money(p.price)])}/></section>
       {data.role!=='employee'&&data.branches.length>0&&<Form title="Yeni malzeme" submit="Malzemeyi kaydet" action={async f=>{
         await save('products',{...Object.fromEntries(f),quantity:Number(f.get('quantity')),minimum:Number(f.get('minimum')),price:Math.round(Number(f.get('price'))*100)});
-      }}><Choice name="branch" label="Şube">{branchOptions(data.branches)}</Choice><Field name="name" label="Malzeme adı"/><Field name="sku" label="Stok kodu"/><Field name="quantity" label="Açılış stoku" type="number"/><Field name="minimum" label="Kritik stok sınırı" type="number"/><Field name="price" label="Birim fiyat (₺)" type="number" step={0.01}/></Form>}
+      }}><Choice name="branch" label="Şube">{branchOptions(data.branches)}</Choice><Field name="name" label="Malzeme adı"/><Field name="sku" label="Stok kodu"/><Field name="barcode" label="Barkod" required={false}/><Field name="quantity" label="Açılış stoku" type="number"/><Field name="minimum" label="Kritik stok sınırı" type="number"/><Field name="price" label="Birim fiyat (₺)" type="number" step={0.01}/></Form>}
     </>}
     {(page==='stock-count'||page==='count-history')&&<>
       {page==='stock-count'&&data.branches.length>0&&<DocumentForm data={data} invoice={false} save={save}/>}

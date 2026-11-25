@@ -264,7 +264,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!user) return '';
     
     switch (user.role) {
-      case 'admin': return 'Sistem Yöneticisi';
+      case 'admin': return 'Patron';
       case 'manager': return 'Yönetici';
       case 'doctor': return 'Denetçi';
       case 'staff': return 'Personel';

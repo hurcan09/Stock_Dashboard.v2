@@ -7,9 +7,20 @@ import app from '../build-v6/app.mjs';
 const directory = process.env.EGE_DATA_DIR || '.ege-data';
 mkdirSync(directory, {recursive:true});
 const sqlite = new DatabaseSync(join(directory,'accounts.sqlite'));
-sqlite.exec('PRAGMA journal_mode=WAL');
+sqlite.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON');
 const schema = readFileSync(new URL('./drizzle/0000_accounts.sql',import.meta.url),'utf8');
 sqlite.exec(schema.replace(/CREATE TABLE /gi,'CREATE TABLE IF NOT EXISTS '));
+sqlite.exec(readFileSync(new URL('./drizzle/0001_membership.sql',import.meta.url),'utf8'));
+sqlite.exec('BEGIN IMMEDIATE');
+try {
+  const hasBranch=sqlite.prepare("SELECT 1 FROM pragma_table_info('v6_team') WHERE name='branch'").get();
+  if (!hasBranch) sqlite.exec(readFileSync(new URL('./drizzle/0003_integrated_stock.sql',import.meta.url),'utf8'));
+  sqlite.exec('COMMIT');
+} catch (error) {
+  sqlite.exec('ROLLBACK');
+  throw error;
+}
+
 
 const DB = {
   prepare(sql) {
@@ -17,6 +28,7 @@ const DB = {
     return {bind(...values) {
       return {
         first: () => statement.get(...values) || null,
+        all: () => ({results:statement.all(...values)}),
         run: () => ({meta:statement.run(...values)})
       };
     }};

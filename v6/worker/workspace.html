@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ege Envanter V6 · Şube Sayımı</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eff5f6;color:#163b49;font:16px/1.45 system-ui}header{padding:16px clamp(16px,5vw,55px);background:#073c50;color:white;display:flex;justify-content:space-between;align-items:center;gap:12px}main{max-width:1120px;margin:auto;padding:18px}section,form{background:white;padding:18px;border-radius:12px;margin-bottom:14px;border:1px solid #dae8e8}section form{margin:12px 0 0;background:#f7fbfb}h1,h2,h3,p{margin:0 0 10px}label{display:block;margin:8px 0}input,select,button{font:inherit;padding:9px;border-radius:7px;border:1px solid #9ab7bf;min-height:44px}input,select{display:block;width:100%;margin-top:4px}button{background:#006b73;color:white;cursor:pointer}header a{color:white}nav{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px}nav a{color:#005d66}article{border-bottom:1px solid #dfebeb;padding:10px 0}article:last-child{border-bottom:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px}#status{overflow-wrap:anywhere;color:#125a63}small{display:block}
+</style>
+</head>
+<body>
+<header><strong>Ege Envanter V6 · Şube Sayımı</strong><div><a href="/index.html">V6 stok paneline dön</a> <button id="logout">Çıkış yap</button></div></header>
+<main><h1 id="title">Şirket çalışma alanı</h1><p id="status" role="status"></p><div id="content"></div></main>
+<script type="module">
+const content=document.querySelector('#content'), status=document.querySelector('#status');
+const names={owner:'Patron',manager:'Yönetici',employee:'Çalışan'};
+const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const label=(text,name,attrs='required')=>`<label>${text}<input name="${name}" ${attrs}></label>`;
+const select=(text,name,options)=>`<label>${text}<select name="${name}" required>${options}</select></label>`;
+const option=(value,text)=>`<option value="${escape(value)}">${escape(text)}</option>`;
+const field=(text,name)=>label(text,name,'required type="number" min="0" max="1000000" step="1"');
+const form=(action,heading,fields,button)=>`<form data-action="${action}"><h3>${heading}</h3>${fields}<button>${button}</button></form>`;
+async function request(path,payload){
+ const result=await fetch(path,payload===undefined?{}:{method:'POST',headers:{'X-Ege-Request':'1','Content-Type':'application/json'},body:JSON.stringify(payload)});
+ if(result.status===401){location.replace('/');throw Error('Oturum sona erdi.');}
+ const body=await result.json();
+ if(!result.ok)throw Error(body.error||'İşlem tamamlanamadı.');
+ return body;
+}
+let view;
+async function load(){
+ view=await request('/api/company');
+ if(!view.company){
+  content.innerHTML=`<div class="grid">${form('create','Yeni şirket',label('Şirket adı','name','required maxlength="100"')+label('İlk şube','branch','required maxlength="100"')+label('Bölge','region','required maxlength="100"'),'Şirket oluştur')}${form('join','Şirket davetine katıl',label('Davet kodu','token'),'Katıl')}</div>`;
+  return;
+ }
+ document.querySelector('#title').textContent=view.company+' · '+names[view.role];
+ const branches=view.branches.map(b=>option(b.id,b.name+' · '+b.region)).join('');
+ const branchField=select('Şube','branch',branches);
+ const roles=select('Rol','role',option('employee','Çalışan')+option('manager','Yönetici'));
+ const owner=view.role==='owner';
+ const sections=['Şubeler','Stok','Sayım geçmişi',...(owner?['Ekip']:[])];
+ content.innerHTML=`<nav aria-label="Şirket menüsü">${sections.map((x,i)=>`<a href="#section${i}">${x}</a>`).join('')}</nav>
+ <div class="grid"><section id="section0"><h2>Şubeler</h2>${view.branches.map(b=>`<article>${escape(b.name)} <small>${escape(b.region)}</small></article>`).join('')}
+ ${owner?form('branches','Yeni şube',label('Şube adı','name','required maxlength="100"')+label('Bölge','region','required maxlength="100"'),'Şube aç'):''}</section>
+ <section id="section1"><h2>Stok</h2>${view.products.map(p=>`<article><strong>${escape(p.name)}</strong><small>${escape(p.sku)} · ${escape(p.branch_name)} · ${p.quantity} adet</small></article>`).join('')||'<p>Henüz ürün eklenmedi.</p>'}
+ ${view.role!=='employee'?form('products','Yeni ürün',branchField+label('Ürün adı','name','required maxlength="100"')+label('Stok kodu','sku','required maxlength="100"')+field('Açılış stoku','quantity'),'Ürün ekle'):''}</section>
+ <section id="section2"><h2>Sayım geçmişi</h2>${view.products.length?form('counts','Manuel sayım',select('Ürün ve şube','product',view.products.map(p=>option(p.id,p.name+' · '+p.branch_name+' · '+p.quantity+' adet')).join(''))+field('Sayılan adet','actual')+label('Not','note','maxlength="500"'),'Sayımı kaydet'):''}
+ ${view.counts.map(c=>`<article><strong>${escape(c.product_name)}</strong><small>${escape(c.branch_name)} · ${escape(c.author_name)} · ${new Date(c.created_at).toLocaleString('tr-TR')} · ${c.expected} → ${c.actual} · Fark ${c.actual-c.expected}</small>${escape(c.note)}</article>`).join('')||'<p>Henüz sayım yok.</p>'}</section>
+ ${owner?`<section id="section3"><h2>Ekip</h2>${view.team.map(m=>`<article><strong>${escape(m.name)}</strong><small>${escape(m.email)} · ${names[m.role]} · ${escape(view.branches.find(b=>b.id===m.branch)?.name||'Tüm şubeler')}</small></article>`).join('')}
+ ${form('invites','Kullanıcı davet et',label('Kayıtta kullanılacak e-posta','email','required type="email" maxlength="254"')+branchField+roles,'Davet kodu üret')}
+ ${view.team.some(m=>m.role!=='owner')?form('roles','Rol veya şube değiştir',select('Ekip üyesi','member',view.team.filter(m=>m.role!=='owner').map(m=>option(m.member,m.name)).join(''))+branchField+roles,'Yetkiyi kaydet'):''}</section>`:''}</div>`;
+}
+content.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const {target:form,submitter}=event;
+ if(submitter)submitter.disabled=true;
+ try{
+  const data=Object.fromEntries(new FormData(form));
+  const action=form.dataset.action;
+  if(action==='products')data.quantity=Number(data.quantity);
+  if(action==='counts'){
+   const product=view.products.find(p=>p.id===data.product);
+   Object.assign(data,{branch:product.branch,expected:product.quantity,actual:Number(data.actual)});
+   if(!window.confirm('Bu sayım ürün stok miktarını güncelleyecek. Kaydedilsin mi?'))return;
+  }
+  const response=await request('/api/company/'+action,data);
+  status.textContent=response.token?'24 saat geçerli davet kodu: '+response.token:'İşlem kaydedildi.';
+  await load();
+ }catch(error){status.textContent=error.message;}
+ finally{if(submitter)submitter.disabled=false;}
+});
+document.querySelector('#logout').addEventListener('click',async()=>{
+ try{await request('/api/logout',{});location.replace('/');}catch(error){status.textContent=error.message;}
+});
+load().catch(error=>{status.textContent=error.message;});
+</script>
+</body></html>

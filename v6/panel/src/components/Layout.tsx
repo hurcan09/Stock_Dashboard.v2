@@ -26,7 +26,7 @@ import {
   Calendar,
   Utensils
 } from 'lucide-react';
-import { dataService } from '../utils/dataService';
+import type { Inventory } from '../InventoryPanel';
 import { DashboardStats, User as UserType, MaterialStatus, SystemLog } from '../types';
 import { useAuth } from '../components/AuthContext.tsx';
 
@@ -34,6 +34,7 @@ interface LayoutProps {
   currentPage: string;
   onPageChange: (page: string) => void;
   children: ReactNode;
+  inventory?: Inventory;
 }
 
 // Statü kartı component'ı
@@ -123,16 +124,17 @@ const SideMenu: React.FC<{
     { id: 'count-history', label: 'Sayım Geçmişi', icon: <Clock className="h-5 w-5" /> },
     { id: 'invoices', label: 'Fatura', icon: <FileText className="h-5 w-5" /> },
     { id: 'reports', label: 'Raporlar', icon: <BarChart3 className="h-5 w-5" /> },
+    { id: 'company-team', label: 'Şirket ve Ekip', icon: <UserCheck className="h-5 w-5" /> },
     { id: 'users', label: 'Kullanıcılar', icon: <UserCheck className="h-5 w-5" /> },
   ];
 
   // Kullanıcının yetkisine göre menüyü filtrele
   const filteredMenuItems = allMenuItems.filter(item => 
-    canViewPage(item.id)
+    item.id === 'company-team' || (item.id==='users'?user?.role==='admin':item.id==='reports'?true:canViewPage(item.id))
   );
 
   // Son Aktiviteler - Sadece Admin ve Yönetici için
-  const recentActivities = dataService.getLogs().slice(0, 5);
+  const recentActivities: SystemLog[] = [];
   const canViewActivities = user?.role === 'admin' || user?.role === 'manager';
 
   const handleMenuItemClick = (pageId: string) => {
@@ -353,52 +355,13 @@ const SideMenu: React.FC<{
   );
 };
 
-export default function Layout({ children, currentPage, onPageChange }: LayoutProps) {
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
-    totalMaterials: 0,
-    totalPatients: 0,
-    totalStockValue: 0,
-    criticalStockCount: 0,
-    totalUsageCost: 0,
-    lowStockMaterials: [],
-    recentActivities: [],
-    topUsedMaterials: [],
-    totalInvoices: 0,
-    totalInvoiceAmount: 0,
-    todayUsageCost: 0,
-    weeklySales: 0,
-    monthlySales: 0,
-    todayUsagesCount: 0,
-    activeSessions: 0,
-    statusSummary: {
-      normal: 0,
-      konsinye: 0,
-      iade: 0,
-      faturalı: 0
-    },
-    totalSessions: 0,
-    recentSessions: [],
-    quickCountSessions: 0,
-    todayCounts: 0,
-    pendingApprovals: 0,
-    dailyPlan: {
-      surgeries: 0,
-      appointments: 0,
-      emergencyCases: 0,
-      mealsServed: 0
-    },
-    hospitalStats: {
-      totalDoctors: 0,
-      totalNurses: 0,
-      bedOccupancy: 0,
-      todayRevenue: 0
-    },
-    userStats: {
-      activeUsers: 0,
-      activeSessions: 0,
-      recentLogins: 0
-    }
-  });
+export default function Layout({ children, currentPage, onPageChange, inventory }: LayoutProps) {
+  const products=inventory?.products||[];
+  const dashboardStats={
+    totalMaterials:products.length,
+    criticalStockCount:products.filter(p=>p.quantity<=p.minimum).length,
+    totalStockValue:products.reduce((total,p)=>total+p.quantity*p.price/100,0)
+  };
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -407,91 +370,13 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
 
   const { user, logout, getRoleDisplayName } = useAuth();
 
-  useEffect(() => {
-    loadDashboardStats();
-    loadNotifications();
-    
-    // 30 saniyede bir dashboard istatistiklerini güncelle
-    const interval = setInterval(loadDashboardStats, 30000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadDashboardStats = useCallback(() => {
-    const stats = dataService.getDashboardStats();
-    setDashboardStats(stats);
-  }, []);
-
-  const loadNotifications = useCallback(() => {
-    const criticalMaterials = dataService.getLowStockMaterials();
-    const expiredMaterials = dataService.getExpiredMaterials();
-    const expiringSoonMaterials = dataService.getExpiringSoonMaterials(7);
-    const recentSessions = dataService.getStockCountSessions()
-      .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())
-      .slice(0, 5);
-
-    const newNotifications: any[] = [];
-
-    // Kritik stok bildirimleri
-    criticalMaterials.forEach(material => {
-      newNotifications.push({
-        id: `critical-${material.id}-${Date.now()}`,
-        type: 'warning',
-        title: '⚠️ Kritik Stok Uyarısı',
-        message: `${material.name} malzemesi kritik stok seviyesinde (${material.currentStock} ${material.unit})`,
-        time: 'Şimdi',
-        read: false,
-        link: 'materials'
-      });
-    });
-
-    // Son kullanma tarihi geçmiş malzemeler
-    expiredMaterials.forEach(material => {
-      newNotifications.push({
-        id: `expired-${material.id}-${Date.now()}`,
-        type: 'error',
-        title: '⏰ Son Kullanma Tarihi Geçmiş',
-        message: `${material.name} malzemesinin son kullanma tarihi geçmiş (${material.expirationDate})`,
-        time: 'Şimdi',
-        read: false,
-        link: 'materials'
-      });
-    });
-
-    // Yakında bitecek malzemeler
-    expiringSoonMaterials.forEach(material => {
-      newNotifications.push({
-        id: `expiring-${material.id}-${Date.now()}`,
-        type: 'warning',
-        title: '📅 Yakında Bitecek',
-        message: `${material.name} malzemesinin son kullanma tarihi yaklaşıyor (${material.expirationDate})`,
-        time: 'Şimdi',
-        read: false,
-        link: 'materials'
-      });
-    });
-
-    // Yeni sayım oturumları
-    recentSessions.forEach(session => {
-      newNotifications.push({
-        id: `session-${session.id}-${Date.now()}`,
-        type: 'info',
-        title: '📋 Yeni Sayım Oturumu',
-        message: `${session.sessionNo} - ${session.invoiceNo} oturumu oluşturuldu`,
-        time: session.createdAt ? new Date(session.createdAt).toLocaleDateString('tr-TR') : '',
-        read: false,
-        link: 'stock-count'
-      });
-    });
-
-    // Eski okunmuş bildirimleri koru
-    const existingReadNotifications = notifications.filter(n => n.read);
-    const allNotifications = [...newNotifications, ...existingReadNotifications]
-      .sort((a, b) => b.time.localeCompare(a.time))
-      .slice(0, 20);
-
-    setNotifications(allNotifications);
-  }, [notifications]);
+  useEffect(()=>{
+    setNotifications((inventory?.counts||[]).slice(0,5).map(count=>({
+      id:count.id,title:'Sayım tamamlandı',message:count.title,
+      time:new Date(count.date).toLocaleDateString('tr-TR'),read:false,
+      type:'info',link:'count-history'
+    })));
+  },[inventory]);
 
   const hasCriticalStock = dashboardStats.criticalStockCount > 0;
   const unreadNotifications = notifications.filter(n => !n.read).length;
@@ -577,6 +462,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                     {currentPage === 'count-history' && 'Sayım Geçmişi'}
                     {currentPage === 'invoices' && 'Fatura Yönetimi'}
                     {currentPage === 'reports' && 'Raporlar'}
+                    {currentPage === 'company-team' && 'Şirket ve Ekip'}
                     {currentPage === 'users' && 'Kullanıcı Yönetimi'}
                   </h2>
                 </div>
@@ -593,6 +479,7 @@ export default function Layout({ children, currentPage, onPageChange }: LayoutPr
                     {currentPage === 'count-history' && 'Sayım Geçmişi'}
                     {currentPage === 'invoices' && 'Fatura'}
                     {currentPage === 'reports' && 'Raporlar'}
+                    {currentPage === 'company-team' && 'Şirket ve Ekip'}
                     {currentPage === 'users' && 'Kullanıcılar'}
                   </h2>
                 </div>

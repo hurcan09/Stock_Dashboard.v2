@@ -1,3 +1,4 @@
+import units from './units.json';
 import accounts from './accounts.json';
 
 const demoCompany='ege-mavi-kiyi-2026';
@@ -40,6 +41,13 @@ export async function readInventory(db,company){
  const row=await stmt(db,'SELECT revision,data FROM v6_inventory WHERE company=?',company).first();
  return row?{revision:row.revision,state:JSON.parse(row.data)}:{revision:0,state:structuredClone(empty)};
 }
+function invoiceDate(value){
+ if(value===undefined)return now();
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
+ const parsed=new Date(value+'T12:00:00.000Z');
+ return Number.isFinite(+parsed)&&parsed.toISOString().slice(0,10)===value?parsed.toISOString():null;
+}
+const productFields=['barcode','gtin','serial','category','subcategory'];
 export async function inventoryApi(db,member,user,req,path){
  if(!member)return error(403,'Önce bir şirkete katılın.');
  const {state,revision}=await readInventory(db,member.id);
@@ -69,19 +77,41 @@ export async function inventoryApi(db,member,user,req,path){
    if(!owner&&!manager)return error(403,'Malzeme ekleme yetkiniz yok.');
    const name=clean(data.name),sku=clean(data.sku);
    if(!name||!sku||!integer(data.quantity)||!integer(data.minimum)||!integer(data.price,100000000)||state.products.some(row=>row.branch===branch.id&&row.sku===sku))return error(400,'Benzersiz stok kodu ve geçerli miktar girin.');
-   state.products.push({id,branch:branch.id,name,sku,barcode:clean(data.barcode),quantity:data.quantity,minimum:data.minimum,price:data.price});
+   state.products.push({id,branch:branch.id,name,sku,barcode:clean(data.barcode),quantity:data.quantity,minimum:data.minimum,price:data.price,createdAt:now()});
   }else if(path==='/api/inventory/invoices'||path==='/api/inventory/counts'){
    const invoice=path.endsWith('/invoices');
    if(invoice&&!owner&&!manager)return error(403,'Fatura kaydetme yetkiniz yok.');
-   if(!Array.isArray(data.lines)||!data.lines.length||data.lines.length>100||new Set(data.lines.map(line=>line?.id)).size!==data.lines.length)return error(400,'En az bir benzersiz malzeme seçin.');
-   const lines=[];
+   if(!Array.isArray(data.lines)||!data.lines.length||data.lines.length>100)return error(400,'En az bir benzersiz malzeme seçin.');
+   const lines=[],seen=new Set();
    for(const line of data.lines){
-    const product=state.products.find(row=>row.id===line?.id&&row.branch===branch.id);
-    if(!product||!integer(line.quantity)||invoice&&(!line.quantity||!integer(line.price,100000000)))return error(400,'Kalem bilgilerini kontrol edin.');
+    if(!line||typeof line!=='object')return error(400,'Kalem bilgilerini kontrol edin.');
+    const sku=clean(line.sku);
+    let product=line.id?state.products.find(row=>row.id===line.id&&row.branch===branch.id):undefined;
+    let metadata={};
+    if(invoice){
+     const name=clean(line.name),unit=line.unit||product?.unit||'Adet';
+     if(!units.includes(unit))return error(400,'Geçerli bir birim seçin.');
+     metadata={unit};
+     for(const field of productFields)if(line[field]!==undefined){
+      if(typeof line[field]!=='string'||line[field].trim().length>100)return error(400,'Ürün bilgileri en fazla 100 karakter olabilir.');
+      metadata[field]=clean(line[field]);
+     }
+     if(!line.id&&sku){
+      product=state.products.find(p=>p.branch===branch.id&&p.sku.toLocaleLowerCase('tr')===sku.toLocaleLowerCase('tr'));
+      if(!product&&name){
+       product={id:crypto.randomUUID(),branch:branch.id,sku,name,quantity:0,minimum:0,price:0,createdAt:now()};
+       state.products.push(product);
+      }
+     }
+     if(product?.unit&&product.unit!==unit&&product.quantity>0)return error(400,'Stokta bulunan malzeme için aynı birimi kullanın.');
+    }
+    if(!product||seen.has(product.id)||!integer(line.quantity)||invoice&&(!line.quantity||!integer(line.price,100000000)))return error(400,'Kalem ve miktar bilgilerini kontrol edin. Aynı malzemeyi bir kez ekleyin.');
+    seen.add(product.id);
     if(!invoice&&line.expected!==product.quantity)return error(409,'Stok güncellendi. Sayfayı yenileyip tekrar sayın.');
     if(invoice&&!integer(product.quantity+line.quantity))return error(400,'Stok miktarı üst sınırı aşıldı.');
     if(invoice){
-     lines.push({id:product.id,name:product.name,quantity:line.quantity,price:line.price});
+     Object.assign(product,metadata);
+     lines.push({id:product.id,name:clean(line.name)||product.name,sku:product.sku,...Object.fromEntries(productFields.map(field=>[field,product[field]])),unit:product.unit,quantity:line.quantity,price:line.price});
      product.quantity+=line.quantity;product.price=line.price;
     }else{
      lines.push({id:product.id,name:product.name,expected:product.quantity,actual:line.quantity,valuationPrice:product.price});
@@ -90,8 +120,10 @@ export async function inventoryApi(db,member,user,req,path){
    }
    if(invoice){
     const number=clean(data.number),supplier=clean(data.supplier);
+    const date=invoiceDate(data.date);
+    if(!date)return error(400,'Geçerli bir fatura tarihi girin.');
     if(!number||!supplier||state.invoices.some(row=>row.branch===branch.id&&row.number===number))return error(400,'Benzersiz fatura numarası ve tedarikçi zorunlu.');
-    state.invoices.unshift({id,branch:branch.id,number,supplier,date:now(),lines});
+    state.invoices.unshift({id,branch:branch.id,number,supplier,date,lines});
    }else{
     const title=clean(data.title);
     if(!title)return error(400,'Sayım adı zorunlu.');

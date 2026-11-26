@@ -1,3 +1,4 @@
+import { Period } from './recordFilters';
 import {useRef,useState,type ReactNode} from 'react';
 import type {Inventory} from './InventoryPanel';
 import './reports.css';
@@ -30,12 +31,6 @@ function Chart({title,points,line=false,format=String}:{title:string;points:Poin
   <label>Grafik detayı <select value={active?.label} onChange={e=>setSelected(e.target.value)}>{points.map(p=><option key={p.label}>{p.label}</option>)}</select></label> <strong>{active&&format(active.value)}</strong>
   </>}
  </section>;
-}
-function Period({mode,setMode,period,setPeriod}:{mode:string;setMode:(v:string)=>void;period:string;setPeriod:(v:string)=>void}){
- return <>
-  <label>Dönem <select value={mode} onChange={e=>{setMode(e.target.value);setPeriod('');}}><option value="day">Gün</option><option value="month">Ay</option><option value="year">Yıl</option></select></label>
-  <label>{mode==='day'?'Gün seç':mode==='month'?'Ay seç':'Yıl seç (takvim)'}<input aria-label={mode==='year'?'Yıl seçmek için takvimden bir tarih seç':'Takvim'} type={mode==='month'?'month':'date'} value={period} onChange={e=>setPeriod(e.target.value)}/></label>
- </>;
 }
 export default function ReportAnalytics({data}:{data:Inventory}){
  const [branch,setBranch]=useState(''),[mode,setMode]=useState('day'),[period,setPeriod]=useState('');

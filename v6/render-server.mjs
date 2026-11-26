@@ -22,6 +22,8 @@ try {
 }
 
 
+sqlite.exec(readFileSync(new URL('./drizzle/0004_operations.sql',import.meta.url),'utf8'));
+
 const DB = {
   prepare(sql) {
     const statement = sqlite.prepare(sql);
@@ -56,7 +58,7 @@ createServer(async (incoming,outgoing) => {
     let length = 0;
     for await (const chunk of incoming) {
       length += chunk.length;
-      if (length > 16384) { outgoing.writeHead(413); return outgoing.end(); }
+      if (length > 131072) { outgoing.writeHead(413); return outgoing.end(); }
       chunks.push(chunk);
     }
     const request = new Request('http://localhost'+incoming.url,{

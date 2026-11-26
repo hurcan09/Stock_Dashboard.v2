@@ -26,6 +26,7 @@ import {
   Calendar,
   Utensils
 } from 'lucide-react';
+import { Dialog, ProfilePage } from '../Operations';
 import type { Inventory } from '../InventoryPanel';
 import { DashboardStats, User as UserType, MaterialStatus, SystemLog } from '../types';
 import { useAuth } from '../components/AuthContext.tsx';
@@ -125,12 +126,13 @@ const SideMenu: React.FC<{
     { id: 'invoices', label: 'Fatura', icon: <FileText className="h-5 w-5" /> },
     { id: 'reports', label: 'Raporlar', icon: <BarChart3 className="h-5 w-5" /> },
     { id: 'company-team', label: 'Şirket ve Ekip', icon: <UserCheck className="h-5 w-5" /> },
+    { id:'activities', label:'Sistem Aktiviteleri', icon:<Clock className="h-5 w-5"/> },
     { id: 'users', label: 'Kullanıcılar', icon: <UserCheck className="h-5 w-5" /> },
   ];
 
   // Kullanıcının yetkisine göre menüyü filtrele
   const filteredMenuItems = allMenuItems.filter(item => 
-    item.id === 'company-team' || (item.id==='users'?user?.role==='admin':item.id==='reports'?true:canViewPage(item.id))
+    ['company-team','activities'].includes(item.id) || (item.id==='users'?user?.role==='admin':item.id==='reports'?true:canViewPage(item.id))
   );
 
   // Son Aktiviteler - Sadece Admin ve Yönetici için
@@ -146,7 +148,7 @@ const SideMenu: React.FC<{
     <>
       {/* Desktop Sidebar */}
       <div className="hidden lg:flex lg:w-72 xl:w-80 flex-shrink-0 sticky top-0 h-screen z-50">
-        <div className="h-full w-full flex flex-col bg-gradient-to-b from-[#103854] to-[#135369] text-white">
+        <div className="h-full w-full flex flex-col ege-waves ege-waves-side text-white">
           {/* Logo ve Hastane Adı */}
           <div className="p-6 border-b border-blue-900">
             <div className="flex items-center space-x-3">
@@ -186,10 +188,6 @@ const SideMenu: React.FC<{
           {showUserSection && (
             <div className="px-4 py-3 bg-blue-900/50">
               <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-blue-300">Departman:</span>
-                  <span className="font-medium text-white">{user?.department}</span>
-                </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-blue-300">Email:</span>
                   <span className="font-medium text-white">{user?.email}</span>
@@ -270,7 +268,7 @@ const SideMenu: React.FC<{
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={onCloseMobileMenu}
           />
-          <div className="phone-drawer absolute left-0 top-0 h-full w-80 bg-gradient-to-b from-[#103854] to-[#135369] text-white shadow-2xl">
+          <div className="phone-drawer absolute left-0 top-0 h-full w-80 ege-waves ege-waves-side text-white shadow-2xl">
             {/* Mobil Menü Başlık */}
             <div className="p-6 border-b border-blue-900 flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -363,6 +361,7 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
     totalStockValue:products.reduce((total,p)=>total+p.quantity*p.price/100,0)
   };
 
+  const [showProfile,setShowProfile]=useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -377,6 +376,8 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
       type:'info',link:'count-history'
     })));
   },[inventory]);
+
+  useEffect(()=>{if(showProfile)void fetch('/api/activities',{method:'POST',headers:{'X-Ege-Request':'1','Content-Type':'application/json'},body:JSON.stringify({page:'profile'})}).catch(()=>{});},[showProfile]);
 
   const hasCriticalStock = dashboardStats.criticalStockCount > 0;
   const unreadNotifications = notifications.filter(n => !n.read).length;
@@ -457,6 +458,8 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
                 <div className="bg-blue-800/50 backdrop-blur-sm px-6 py-2 rounded-full border border-blue-700/50">
                   <h2 className="text-lg font-semibold text-white text-center">
                     {currentPage === 'dashboard' && 'Anasayfa'}
+                    {currentPage === 'profile' && 'Profil'}
+                    {currentPage === 'activities' && 'Sistem Aktiviteleri'}
                     {currentPage === 'materials' && 'Malzeme Yönetimi'}
                     {currentPage === 'stock-count' && 'Stok Takip'}
                     {currentPage === 'count-history' && 'Sayım Geçmişi'}
@@ -474,6 +477,8 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
                 <div className="hidden sm:block lg:hidden text-center">
                   <h2 className="text-sm font-semibold text-white">
                     {currentPage === 'dashboard' && 'Anasayfa'}
+                    {currentPage === 'profile' && 'Profil'}
+                    {currentPage === 'activities' && 'Sistem Aktiviteleri'}
                     {currentPage === 'materials' && 'Malzeme'}
                     {currentPage === 'stock-count' && 'Stok'}
                     {currentPage === 'count-history' && 'Sayım Geçmişi'}
@@ -617,9 +622,6 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
                         <p className="font-semibold text-gray-900">{user?.name}</p>
                         <p className="text-sm text-gray-600">{user?.email}</p>
                         <div className="mt-2 flex items-center space-x-2">
-                          <span className="px-2 py-1 bg-gray-100 text-lagoon-600 text-xs rounded-full capitalize">
-                            {user?.department}
-                          </span>
                           <span className="px-2 py-1 bg-lagoon-100 text-lagoon-700 text-xs rounded-full capitalize">
                             {getRoleDisplayName()}
                           </span>
@@ -636,6 +638,7 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
                           <AnaSayfaIcon className="h-4 w-4 text-gray-500" />
                           <span>Anasayfa</span>
                         </button>
+                        <button className="block w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50" onClick={()=>{setShowUserMenu(false);setShowProfile(true);}}>Profil</button>
                         <div className="border-t border-gray-200 my-2"></div>
                         <button
                           onClick={logout}
@@ -657,11 +660,12 @@ export default function Layout({ children, currentPage, onPageChange, inventory 
         <main className="flex-1 overflow-x-auto p-0">
           <div className="bg-white min-h-[calc(100vh-12rem)] p-4 lg:p-6">
             {children}
+            {showProfile&&<Dialog title="Profil" close={()=>setShowProfile(false)}><ProfilePage compact/></Dialog>}
           </div>
         </main>
 
         {/* Footer */}
-        <footer className="bg-gradient-to-r from-[#103854] to-[#135369] text-white p-4 border-t border-blue-800">
+        <footer className="ege-waves ege-waves-footer text-white p-4 border-t border-blue-800">
           <div className="flex flex-col md:flex-row items-center justify-between">
             <div className="mb-3 md:mb-0">
               <h3 className="text-base font-bold flex items-center text-white">

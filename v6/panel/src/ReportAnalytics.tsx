@@ -46,7 +46,7 @@ export default function ReportAnalytics({data}:{data:Inventory}){
   .map(i=>({...i,lines:i.lines.filter(l=>!product.trim()||ids.has(l.id)||(!data.products.some(p=>p.id===l.id)&&match(l.name,product)))})).filter(i=>i.lines.length);
  const billed=new Set(invoices.flatMap(i=>i.lines.map(l=>l.id)));
  const filtered=candidates.filter(p=>!invoice.trim()||billed.has(p.id));
- const countRows=data.counts.filter(c=>inBranch(c.branch))
+ const countRows=data.counts.filter(c=>(!c.status||c.status==='approved')&&inBranch(c.branch))
   .map(c=>({...c,lines:c.lines.filter(l=>(!product.trim()||ids.has(l.id)||(!data.products.some(p=>p.id===l.id)&&match(l.name,product)))&&(!invoice.trim()||billed.has(l.id)))})).filter(c=>c.lines.length);
  const counts=countRows.filter(c=>inPeriod(c.date));
  const products=period?filtered.filter(p=>counts.some(c=>c.lines.some(l=>l.id===p.id))||invoices.some(i=>i.lines.some(l=>l.id===p.id))):filtered;

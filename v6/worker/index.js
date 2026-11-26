@@ -1,3 +1,4 @@
+import { operationsApi,logActivity,profile } from './operations.js';
 import { ensureFixture, inventoryApi, readInventory } from './inventory.js';
 import { membership } from './membership.js';
 import accounts from './accounts.json';
@@ -23,14 +24,27 @@ export default {async fetch(req,env){
  const session=token?await db.prepare('SELECT member FROM sessions WHERE token=? AND expires>?').bind(await digest(token),Date.now()).first():null;
  const knownDemo=session&&accounts.find(a=>a.id===session.member);
  if(knownDemo)await ensureFixture(db,knownDemo.email);
+ if(path==='/api/profile'||path==='/api/activities')return operationsApi(db,req,path,session?.member,session&&await memberships.get(session.member));
  if(path.startsWith('/api/inventory')){
   if(!session)return json({error:'Oturum açın.'},401);
   const user=await db.prepare('SELECT id,name FROM members WHERE id=?').bind(session.member).first();
-  return inventoryApi(db,await memberships.get(session.member),user,req,path);
+  const member=await memberships.get(session.member);
+  const response=await inventoryApi(db,member,user,req,path);
+  const action={
+   branches:['company-team','Şube açtı'],products:['materials','Malzeme ekledi'],import:['materials','Excel’den malzeme aktardı'],
+   invoices:['invoices','Fatura kaydetti'],counts:['stock-count','Sayımı onaya gönderdi'],
+   approve:['stock-count','Sayımı onayladı'],reject:['stock-count','Sayımı düzeltmeye gönderdi'],
+   tasks:['dashboard','Sayım görevi kaydetti'],notes:['dashboard','Duyuru yayımladı']
+  }[path.split('/').at(-1)];
+  if(req.method==='POST'&&response.ok&&action){
+   const payload=await response.clone().json();
+   await logActivity(db,member,user.id,...action,payload.branch??member.branch).catch(console.error);
+  }
+  return response;
  }
  if(req.method==='POST'){
   if(req.headers.get('X-Ege-Request')!=='1')return json({},403);
-  if(path==='/api/logout'){if(token)await db.prepare('DELETE FROM sessions WHERE token=?').bind(await digest(token)).run();return json({},200,cookie('',0));}
+  if(path==='/api/logout'){if(session)await logActivity(db,await memberships.get(session.member),session.member,'Oturum','Çıkış yaptı').catch(console.error);if(token)await db.prepare('DELETE FROM sessions WHERE token=?').bind(await digest(token)).run();return json({},200,cookie('',0));}
   if(path==='/api/team/invite'||path==='/api/team/assignment'||path==='/api/team/account'){
    if(!session)return json({error:'Oturum açın.'},401);
    const user=await db.prepare('SELECT * FROM members WHERE id=?').bind(session.member).first();
@@ -49,6 +63,7 @@ export default {async fetch(req,env){
       db.prepare('DELETE FROM sessions WHERE member=?').bind(user.id)
      ]);
     }catch{return json({error:'E-posta değiştirilemedi.'},409);}
+    await logActivity(db,await memberships.get(user.id),user.id,'profile','Hesap bilgilerini güncelledi').catch(console.error);
     return json({},200,cookie('',0));
    }
    const company=await memberships.get(user.id);
@@ -57,12 +72,15 @@ export default {async fetch(req,env){
    if(!state.branches.some(b=>b.id===data.branch)||!['manager','employee'].includes(data.role))return json({error:'Şube ve rol seçin.'},400);
    if(path==='/api/team/assignment'){
     const r=await db.prepare("UPDATE v6_team SET branch=?,role=? WHERE member=? AND company=? AND role<>'owner'").bind(data.branch,data.role,String(data.member||''),company.id).run();
+    if(r.meta.changes)await logActivity(db,company,user.id,'company-team','Şube ve rol atamasını güncelledi',data.branch).catch(console.error);
     return r.meta.changes?json({}):json({error:'Ekip üyesi bulunamadı.'},404);
    }
    const email=String(data.email||'').trim().toLowerCase();
    if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return json({error:'E-posta adresini kontrol edin.'},400);
    if(accounts.some(a=>a.email===email))return json({error:'Mevcut demo hesabının şubesini ekip ayarlarından değiştirin.'},400);
-   return json({token:await memberships.invite(company.id,email,data.role,data.branch)},201);
+   const token=await memberships.invite(company.id,email,data.role,data.branch);
+   await logActivity(db,company,user.id,'company-team','Ekip daveti oluşturdu',data.branch).catch(console.error);
+   return json({token},201);
   }
   if(path==='/api/team/join'){
    if(!session)return json({error:'Oturum açın.'},401);
@@ -94,6 +112,8 @@ export default {async fetch(req,env){
    const derived=await derive(pw,(u||accounts[0]).salt);if(!u||derived!==u.hash)return json({error:'E-posta veya şifre hatalı.'},401);
   }
   const raw=random(32);await db.batch([db.prepare('DELETE FROM sessions WHERE expires<=? OR token=?').bind(Date.now(),await digest(token||'')),db.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await digest(raw),u.id,Date.now()+28800000)]);
+  await profile(db,u.id).catch(console.error);
+  await logActivity(db,await memberships.get(u.id),u.id,'Oturum',path==='/api/register'?'Hesap oluşturdu':'Giriş yaptı').catch(console.error);
   return json({},200,cookie(raw,28800));
  }
  if(path==='/api/me'){
